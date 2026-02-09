@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { CylinderControls } from "./components/CylinderControls";
 import { FieldVisualization } from "./components/FieldVisualization";
 import { useScattering } from "./hooks/useScattering";
@@ -12,36 +12,39 @@ import type { ScatteringParams } from "./types/cylinder";
 import "./App.css";
 
 function App() {
-  const [params, setParams] = useState<ScatteringParams>(createDefaultParams());
-  const [isComputing, setIsComputing] = useState(false);
-
   const {
     isLoading,
     isReady,
     error,
     scatteringResult,
-    fieldResult,
+    computedParams,
+    imageStats,
+    hasImage,
+    paintRef,
     computeAll,
+    recolor,
   } = useScattering();
 
-  // Auto-compute when params change or when WASM becomes ready
+  // Called on every slider event — non-blocking, posts to worker.
+  // No setState here: CylinderControls owns its own display state,
+  // and App's info section updates when worker results arrive.
+  const handleParamsChange = useCallback(
+    (p: ScatteringParams) => {
+      computeAll(p);
+    },
+    [computeAll],
+  );
+
+  // Initial computation when WASM worker is ready
   useEffect(() => {
-    if (!isReady) return;
+    if (isReady) {
+      computeAll(createDefaultParams());
+    }
+  }, [isReady, computeAll]);
 
-    // Computation is fast enough (~2-5ms) to run immediately
-    const compute = async () => {
-      setIsComputing(true);
-      try {
-        await computeAll(params);
-      } catch (err) {
-        console.error("Computation error:", err);
-      } finally {
-        setIsComputing(false);
-      }
-    };
-
-    compute();
-  }, [isReady, params, computeAll]);
+  // Use computedParams (set when worker returns) for the info section.
+  // Falls back to defaults before first result arrives.
+  const displayParams = computedParams ?? createDefaultParams();
 
   return (
     <div className="app">
@@ -56,9 +59,11 @@ function App() {
       <main className="app-main">
         <div className="visualization-panel">
           <FieldVisualization
-            fieldResult={fieldResult}
-            isComputing={isComputing}
-            polarization={params.polarization}
+            paintRef={paintRef}
+            imageStats={imageStats}
+            hasImage={hasImage}
+            polarization={displayParams.polarization}
+            onModeChange={recolor}
             width={512}
             height={512}
           />
@@ -67,7 +72,6 @@ function App() {
             {isLoading && (
               <span className="status">Loading WASM module...</span>
             )}
-            {isComputing && <span className="status">Computing...</span>}
             {error && <span className="status error">{error}</span>}
           </div>
 
@@ -75,30 +79,31 @@ function App() {
             <h3>Scattering Info</h3>
             <p>
               Size parameter: x ={" "}
-              {calculateSizeParameter(params.wavelength).toFixed(4)}
+              {calculateSizeParameter(displayParams.wavelength).toFixed(4)}
             </p>
             <p>
-              Permittivity: εᵣ = {formatComplex(params.material.permittivity)}
+              Permittivity: εᵣ ={" "}
+              {formatComplex(displayParams.material.permittivity)}
             </p>
             <p>
-              Permeability: μᵣ = {formatComplex(params.material.permeability)}
+              Permeability: μᵣ ={" "}
+              {formatComplex(displayParams.material.permeability)}
             </p>
             <p>
               Refractive index: n ={" "}
-              {formatComplex(calculateRefractiveIndex(params.material))}
+              {formatComplex(calculateRefractiveIndex(displayParams.material))}
             </p>
             {scatteringResult && (
               <p>
-                Orders: {scatteringResult.orders[0]} to{" "}
-                {scatteringResult.orders[scatteringResult.orders.length - 1]} (
-                {scatteringResult.orders.length} terms)
+                Orders: {scatteringResult.minOrder} to{" "}
+                {scatteringResult.maxOrder} ({scatteringResult.numOrders} terms)
               </p>
             )}
           </div>
         </div>
 
         <div className="controls-panel">
-          <CylinderControls params={params} onChange={setParams} />
+          <CylinderControls onChange={handleParamsChange} />
         </div>
       </main>
     </div>

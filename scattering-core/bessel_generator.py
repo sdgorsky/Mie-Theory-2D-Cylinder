@@ -8,16 +8,9 @@ import sys
 
 this_system = platform.uname()
 
-orders_max = 10 # Number of bessel orders
-grid_size = 128 # Number of points per edge
-z_max = 10 # Half of the square edge length
+orders_max = 20 # Number of bessel orders
 
 shared_info = textwrap.dedent(f"""\
-    # Grid Details:
-    #   dimension: {2*z_max}x{2*z_max}
-    #   grid size: {grid_size}x{grid_size}
-    #   resolution: {2*z_max/grid_size:.2e}
-    #   
     # Hardware details:
     #   date: {datetime.now(tz=UTC)}
     #   system: {this_system.system}
@@ -34,12 +27,12 @@ shared_info = textwrap.dedent(f"""\
 
 def create_bessel_j_file():
 
-    bessel_j_values = [] # (order, z_real, z_imag, eval_real, eval_imag)
+    bessel_j_values = [] # (order, z_r, z_theta, eval_real, eval_imag)
     for order in range(0,orders_max+1):
-        for z_real in np.linspace(-z_max, z_max, grid_size):
-            for z_imag in np.linspace(-z_max, z_max, grid_size):
-                value = jv(order, z_real + 1j*z_imag)
-                bessel_j_values.append((order, z_real.item(), z_imag.item(), value.real.item(), value.imag.item()))
+        for r in np.logspace(-3,2,30):
+            for theta in np.linspace(0, 2*np.pi, 20):
+                value = jv(order, r * np.exp(1j*theta) )
+                bessel_j_values.append((order, r.item(), theta.item(), value.real.item(), value.imag.item()))
 
     with open("artifacts/bessel_j_evaluations.txt", "w") as f:
 
@@ -49,12 +42,12 @@ def create_bessel_j_file():
             #
             # Function representation: J(ν, z)
             #   J --> [complex] Bessel function of the first kind
-            #   z --> [complex] argument   
+            #   z --> [complex] argument
             #   ν --> [int] bessel order
             #
             """))
         f.write(shared_info)
-        f.write("# Data shape: (order, real(z), imag(z), real(J), imag(J)) \n")
+        f.write("# Data shape: (order, z_r, z_theta, real(J), imag(J)) \n")
 
         for v in bessel_j_values:
             f.write(str(v))
@@ -64,10 +57,10 @@ def create_hankel1_file():
 
     bessel_h_values = [] # (order, z_real, z_imag, eval_real, eval_imag)
     for order in range(0,orders_max+1):
-        for z_real in np.linspace(-z_max, z_max, grid_size):
-            for z_imag in np.linspace(-z_max, z_max, grid_size):
-                value = hankel1(order, z_real + 1j*z_imag)
-                bessel_h_values.append((order, z_real.item(), z_imag.item(), value.real.item(), value.imag.item()))
+        for r in np.logspace(-3,2,30):
+            for theta in np.linspace(0, 2*np.pi, 20):
+                value = hankel1(order, r * np.exp(1j*theta) )
+                bessel_h_values.append((order, r.item(), theta.item(), value.real.item(), value.imag.item()))
 
     with open("artifacts/hankel1_evaluations.txt", "w") as f:
 
@@ -77,12 +70,12 @@ def create_hankel1_file():
             #
             # Function representation: H1(ν, z)
             #   H --> [complex] Hankel function of the first kind
-            #   z --> [complex] argument   
+            #   z --> [real] argument   
             #   ν --> [int] bessel order
             #
             """))
         f.write(shared_info)
-        f.write("# Data shape: (order, real(z), imag(z), real(J), imag(J)) \n")
+        f.write("# Data shape: (order, real(z), real(J), imag(J)) \n")
 
         for v in bessel_h_values:
             f.write(str(v))

@@ -1,13 +1,13 @@
+import { useState, memo } from "react";
 import type {
   ScatteringParams,
   ComplexObj,
   Polarization,
 } from "../types/cylinder";
-import { calculateSizeParameter } from "../types/cylinder";
+import { createDefaultParams, calculateSizeParameter } from "../types/cylinder";
 import "./CylinderControls.css";
 
 interface CylinderControlsProps {
-  params: ScatteringParams;
   onChange: (params: ScatteringParams) => void;
 }
 
@@ -89,34 +89,45 @@ function ComplexInput({
   );
 }
 
-export function CylinderControls({ params, onChange }: CylinderControlsProps) {
+export const CylinderControls = memo(function CylinderControls({
+  onChange,
+}: CylinderControlsProps) {
+  // CylinderControls owns its state — no params prop means React.memo blocks
+  // all parent re-renders (onChange is a stable ref-writing callback).
+  const [local, setLocal] = useState(createDefaultParams);
+
+  const update = (next: ScatteringParams) => {
+    setLocal(next);
+    onChange(next); // just a ref write in App — instant, no React work
+  };
+
   const updateWavelength = (wavelength: number) => {
-    onChange({ ...params, wavelength });
+    update({ ...local, wavelength });
   };
 
   const updatePolarization = (polarization: Polarization) => {
-    onChange({ ...params, polarization });
+    update({ ...local, polarization });
   };
 
   const updateMaxOrder = (maxOrder: number) => {
-    onChange({ ...params, maxOrder });
+    update({ ...local, maxOrder });
   };
 
   const updatePermittivity = (permittivity: ComplexObj) => {
-    onChange({
-      ...params,
-      material: { ...params.material, permittivity },
+    update({
+      ...local,
+      material: { ...local.material, permittivity },
     });
   };
 
   const updatePermeability = (permeability: ComplexObj) => {
-    onChange({
-      ...params,
-      material: { ...params.material, permeability },
+    update({
+      ...local,
+      material: { ...local.material, permeability },
     });
   };
 
-  const sizeParameter = calculateSizeParameter(params.wavelength);
+  const sizeParameter = calculateSizeParameter(local.wavelength);
 
   return (
     <div className="cylinder-controls">
@@ -131,7 +142,7 @@ export function CylinderControls({ params, onChange }: CylinderControlsProps) {
             min={0.1}
             max={5}
             step={0.01}
-            value={params.wavelength}
+            value={local.wavelength}
             onChange={(e) => updateWavelength(parseFloat(e.target.value))}
           />
           <input
@@ -139,7 +150,7 @@ export function CylinderControls({ params, onChange }: CylinderControlsProps) {
             min={0.01}
             max={10}
             step={0.01}
-            value={params.wavelength}
+            value={local.wavelength}
             onChange={(e) =>
               updateWavelength(parseFloat(e.target.value) || 0.1)
             }
@@ -154,13 +165,13 @@ export function CylinderControls({ params, onChange }: CylinderControlsProps) {
         <label className="section-label">Polarization</label>
         <div className="polarization-buttons">
           <button
-            className={params.polarization === "TM" ? "active" : ""}
+            className={local.polarization === "TM" ? "active" : ""}
             onClick={() => updatePolarization("TM")}
           >
             TM (E∥z)
           </button>
           <button
-            className={params.polarization === "TE" ? "active" : ""}
+            className={local.polarization === "TE" ? "active" : ""}
             onClick={() => updatePolarization("TE")}
           >
             TE (H∥z)
@@ -177,7 +188,7 @@ export function CylinderControls({ params, onChange }: CylinderControlsProps) {
             min={1}
             max={30}
             step={1}
-            value={params.maxOrder}
+            value={local.maxOrder}
             onChange={(e) => updateMaxOrder(parseInt(e.target.value))}
           />
           <input
@@ -185,17 +196,17 @@ export function CylinderControls({ params, onChange }: CylinderControlsProps) {
             min={1}
             max={50}
             step={1}
-            value={params.maxOrder}
+            value={local.maxOrder}
             onChange={(e) => updateMaxOrder(parseInt(e.target.value) || 1)}
           />
         </div>
-        <div className="derived-value">Terms: {2 * params.maxOrder + 1}</div>
+        <div className="derived-value">Terms: {2 * local.maxOrder + 1}</div>
       </div>
 
       <div className="control-section">
         <ComplexInput
           label="Relative Permittivity (εᵣ)"
-          value={params.material.permittivity}
+          value={local.material.permittivity}
           onChange={updatePermittivity}
           realMin={-10}
           realMax={20}
@@ -207,7 +218,7 @@ export function CylinderControls({ params, onChange }: CylinderControlsProps) {
       <div className="control-section">
         <ComplexInput
           label="Relative Permeability (μᵣ)"
-          value={params.material.permeability}
+          value={local.material.permeability}
           onChange={updatePermeability}
           realMin={-10}
           realMax={10}
@@ -217,4 +228,4 @@ export function CylinderControls({ params, onChange }: CylinderControlsProps) {
       </div>
     </div>
   );
-}
+});

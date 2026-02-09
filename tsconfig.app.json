@@ -16,6 +16,8 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Path aliases (mirrors vite.config.ts resolve.alias) */
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,

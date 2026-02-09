@@ -254,6 +254,9 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
     let mut field_real = vec![0.0; total_points];
     let mut field_imag = vec![0.0; total_points];
 
+    // Pre-allocate exp(i*n*θ) table — reused for every grid point
+    let mut exp_table = vec![Complex64::new(0.0, 0.0); n_coeffs];
+
     // Only compute top half (y >= 0), mirror to bottom half
     for iy in 0..GRID_SIZE / 2 {
         let y = y_max - (iy as f64 + 0.5) * dx;
@@ -266,17 +269,24 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
         for ix in 0..GRID_SIZE {
             let x = x_min + (ix as f64 + 0.5) * dx;
             let r = (x * x + y * y).sqrt();
-            let theta = y.atan2(x);
+
+            // cos(θ) = x/r, sin(θ) = y/r — avoids atan2 + cos/sin calls
+            let inv_r = 1.0 / r;
+            let cos_theta = x * inv_r;
+            let sin_theta = y * inv_r;
+
+            // Fill exp(i*n*θ) table using recurrence (0 trig calls)
+            fill_exp_intheta(&mut exp_table, cos_theta, sin_theta);
 
             let idx = row_offset + ix;
             let idx_sym = row_offset_sym + ix;
 
             let field = if r < RADIUS {
                 // Interior field using Bessel J splines
-                compute_interior_field_spline(&c_n, &params.orders, &bessel_splines, r, theta)
+                compute_interior_field_spline(&c_n, &bessel_splines, r, &exp_table)
             } else {
                 // Exterior field using Hankel splines
-                compute_exterior_field_spline(&b_n, &params.orders, &hankel_splines, k0, r, theta)
+                compute_exterior_field_spline(&b_n, &hankel_splines, k0, r, cos_theta, &exp_table)
             };
 
             // Fill both point and its y-symmetric counterpart
@@ -299,22 +309,43 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
     }
 }
 
+/// Fill pre-allocated buffer with exp(i*n*θ) values for all orders.
+/// Uses angle-addition recurrence: only needs cos(θ) and sin(θ), no per-order trig.
+/// Orders are consecutive integers from -N to +N (2N+1 values).
+#[inline]
+fn fill_exp_intheta(table: &mut [Complex64], cos_t: f64, sin_t: f64) {
+    let mid = table.len() / 2;
+
+    // exp(i*0*θ) = 1
+    table[mid] = Complex64::new(1.0, 0.0);
+
+    // Step: exp(i*θ) for forward recurrence, exp(-i*θ) for backward
+    let step_fwd = Complex64::new(cos_t, sin_t); // exp(+iθ)
+    let step_bwd = Complex64::new(cos_t, -sin_t); // exp(-iθ)
+
+    // Forward: exp(i*(n+1)*θ) = exp(i*n*θ) * exp(i*θ)
+    for k in 1..=mid {
+        table[mid + k] = table[mid + k - 1] * step_fwd;
+    }
+    // Backward: exp(i*(n-1)*θ) = exp(i*n*θ) * exp(-i*θ)
+    for k in 1..=mid {
+        table[mid - k] = table[mid - k + 1] * step_bwd;
+    }
+}
+
 /// Compute interior field using spline-interpolated Bessel J values
 #[inline]
 fn compute_interior_field_spline(
     c_n: &[Complex64],
-    orders: &[i32],
     bessel_splines: &[BesselSpline],
     r: f64,
-    theta: f64,
+    exp_table: &[Complex64],
 ) -> Complex64 {
     let mut field = Complex64::new(0.0, 0.0);
 
-    for (i, &n) in orders.iter().enumerate() {
+    for i in 0..c_n.len() {
         let jn = bessel_splines[i].eval(r);
-        let n_theta = n as f64 * theta;
-        let exp_intheta = Complex64::new(n_theta.cos(), n_theta.sin());
-        field += c_n[i] * jn * exp_intheta;
+        field += c_n[i] * jn * exp_table[i];
     }
 
     field
@@ -324,23 +355,21 @@ fn compute_interior_field_spline(
 #[inline]
 fn compute_exterior_field_spline(
     b_n: &[Complex64],
-    orders: &[i32],
     hankel_splines: &[BesselSpline],
     k0: f64,
     r: f64,
-    theta: f64,
+    cos_theta: f64,
+    exp_table: &[Complex64],
 ) -> Complex64 {
     // Incident plane wave: exp(i*k0*x) where x = r*cos(theta)
-    let k0x = k0 * r * theta.cos();
+    let k0x = k0 * r * cos_theta;
     let incident = Complex64::new(k0x.cos(), k0x.sin());
 
     // Scattered field: Σ_n b_n * H_n(k0*r) * exp(i*n*θ)
     let mut scattered = Complex64::new(0.0, 0.0);
-    for (i, &n) in orders.iter().enumerate() {
+    for i in 0..b_n.len() {
         let hn = hankel_splines[i].eval(r);
-        let n_theta = n as f64 * theta;
-        let exp_intheta = Complex64::new(n_theta.cos(), n_theta.sin());
-        scattered += b_n[i] * hn * exp_intheta;
+        scattered += b_n[i] * hn * exp_table[i];
     }
 
     incident + scattered
@@ -417,10 +446,6 @@ mod tests {
     use super::*;
     use crate::scattering::{calculate_scattering, Material, Polarization, ScatteringParams};
 
-    fn approx_eq(a: Complex64, b: Complex64, tol: f64) -> bool {
-        (a - b).norm() < tol
-    }
-
     #[test]
     fn test_dielectric_tm() {
         let params = ScatteringParams {
@@ -432,7 +457,7 @@ mod tests {
                 permeability_imag: 0.0,
             },
             polarization: Polarization::TM,
-            max_order: 5,
+            max_order: 10,
         };
 
         let result = calculate_scattering(&params);
@@ -480,9 +505,8 @@ mod tests {
 
         for (i, (ei, ee)) in phiz_int.iter().zip(phiz_ext.iter()).enumerate() {
             let diff = ei - ee;
-            // Tolerance relaxed to 5% for low-order truncation (max_order=5)
             assert!(
-                diff.norm() < 0.05,
+                diff.norm() < 1e-5,
                 "Expected small difference in interior and exterior field, got {i}:{:.4e}",
                 diff.norm()
             );

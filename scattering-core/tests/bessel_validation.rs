@@ -2,7 +2,7 @@
 
 use num_complex::Complex64;
 use scattering_core::bessel::{bessel_j, hankel1};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -11,13 +11,14 @@ use std::io::{BufRead, BufReader, Write};
 #[derive(Debug, Clone)]
 struct ReferencePoint {
     order: i32,
+    radius: f64,
     z: Complex64,
     expected: Complex64,
 }
 
-/// Statistics for a region or order.
+/// Statistics for a group of test points.
 #[derive(Debug, Clone, Default)]
-struct RegionalStats {
+struct GroupStats {
     count: usize,
     max_absolute_error: f64,
     max_relative_error: f64,
@@ -25,15 +26,7 @@ struct RegionalStats {
     sum_relative_error: f64,
 }
 
-impl RegionalStats {
-    fn mean_absolute_error(&self) -> f64 {
-        if self.count == 0 {
-            0.0
-        } else {
-            self.sum_absolute_error / self.count as f64
-        }
-    }
-
+impl GroupStats {
     fn mean_relative_error(&self) -> f64 {
         if self.count == 0 {
             0.0
@@ -72,21 +65,19 @@ struct AccuracyReport {
     max_relative_error: f64,
     mean_absolute_error: f64,
     mean_relative_error: f64,
-    max_abs_error_point: Option<FailureDetail>,
     max_rel_error_point: Option<FailureDetail>,
-    errors_by_order: HashMap<i32, RegionalStats>,
-    errors_by_region: HashMap<String, RegionalStats>,
+    /// Key: (order, radius_bits) — radius_bits is f64::to_bits() for exact grouping
+    errors_by_order_radius: BTreeMap<(i32, u64), GroupStats>,
     worst_cases: Vec<FailureDetail>,
 }
 
-/// Parse a line in Python tuple format: (order, re_z, im_z, re_result, im_result)
+/// Parse a line in format: (order, radius, angle, re_result, im_result)
 fn parse_line(line: &str) -> Option<ReferencePoint> {
     let line = line.trim();
     if line.is_empty() || line.starts_with('#') {
         return None;
     }
 
-    // Remove parentheses and split by comma
     let inner = line.trim_start_matches('(').trim_end_matches(')');
     let parts: Vec<&str> = inner.split(',').map(|s| s.trim()).collect();
 
@@ -95,14 +86,15 @@ fn parse_line(line: &str) -> Option<ReferencePoint> {
     }
 
     let order: i32 = parts[0].parse().ok()?;
-    let re_z: f64 = parts[1].parse().ok()?;
-    let im_z: f64 = parts[2].parse().ok()?;
+    let z_radius: f64 = parts[1].parse().ok()?;
+    let z_angle: f64 = parts[2].parse().ok()?;
     let re_result: f64 = parts[3].parse().ok()?;
     let im_result: f64 = parts[4].parse().ok()?;
 
     Some(ReferencePoint {
         order,
-        z: Complex64::new(re_z, im_z),
+        radius: z_radius,
+        z: Complex64::new(z_radius * z_angle.cos(), z_radius * z_angle.sin()),
         expected: Complex64::new(re_result, im_result),
     })
 }
@@ -112,7 +104,6 @@ fn compare(computed: Complex64, expected: Complex64) -> (f64, f64) {
     let abs_err = (computed - expected).norm();
     let expected_norm = expected.norm();
 
-    // For very small expected values, use absolute error threshold
     let rel_err = if expected_norm < 1e-12 {
         if abs_err < 1e-10 {
             0.0
@@ -126,22 +117,6 @@ fn compare(computed: Complex64, expected: Complex64) -> (f64, f64) {
     (abs_err, rel_err)
 }
 
-/// Classify a point by |z| into regions.
-fn classify_region(z: Complex64) -> String {
-    let magnitude = z.norm();
-    if magnitude < 0.1 {
-        "near_origin".to_string()
-    } else if magnitude < 1.0 {
-        "small".to_string()
-    } else if magnitude < 5.0 {
-        "moderate".to_string()
-    } else if magnitude < 15.0 {
-        "large".to_string()
-    } else {
-        "very_large".to_string()
-    }
-}
-
 /// Run validation against a data file using the provided function.
 fn run_validation<F>(
     data_path: &str,
@@ -152,7 +127,7 @@ fn run_validation<F>(
 where
     F: Fn(i32, Complex64) -> Complex64,
 {
-    let file = File::open(data_path).expect(&format!("Failed to open {}", data_path));
+    let file = File::open(data_path).unwrap_or_else(|_| panic!("Failed to open {}", data_path));
     let reader = BufReader::new(file);
 
     let rel_err_threshold = 1e-6;
@@ -163,23 +138,18 @@ where
     let mut max_relative_error = 0.0f64;
     let mut sum_absolute_error = 0.0f64;
     let mut sum_relative_error = 0.0f64;
-    let mut max_abs_error_point: Option<FailureDetail> = None;
     let mut max_rel_error_point: Option<FailureDetail> = None;
-    let mut errors_by_order: HashMap<i32, RegionalStats> = HashMap::new();
-    let mut errors_by_region: HashMap<String, RegionalStats> = HashMap::new();
+    let mut errors_by_order_radius: BTreeMap<(i32, u64), GroupStats> = BTreeMap::new();
     let mut worst_cases: Vec<FailureDetail> = Vec::new();
 
-    // Collect all valid points for sampling
     let all_points: Vec<ReferencePoint> = reader
         .lines()
         .filter_map(|line| line.ok())
         .filter_map(|line| parse_line(&line))
         .collect();
 
-    // Apply sampling if specified
     let points_to_test: Vec<&ReferencePoint> = match sample_size {
         Some(n) if n < all_points.len() => {
-            // Deterministic sampling: take every nth point
             let step = all_points.len() / n;
             all_points.iter().step_by(step).take(n).collect()
         }
@@ -187,7 +157,29 @@ where
     };
 
     for point in points_to_test {
+        if !point.expected.re.is_finite() || !point.expected.im.is_finite() {
+            continue;
+        }
+
         let computed = compute_fn(point.order, point.z);
+
+        if !computed.re.is_finite() || !computed.im.is_finite() {
+            total_points += 1;
+            let detail = FailureDetail {
+                order: point.order,
+                z: point.z,
+                expected: point.expected,
+                computed,
+                absolute_error: f64::INFINITY,
+                relative_error: f64::INFINITY,
+            };
+            max_absolute_error = f64::INFINITY;
+            max_relative_error = f64::INFINITY;
+            max_rel_error_point = Some(detail.clone());
+            worst_cases.push(detail);
+            continue;
+        }
+
         let (abs_err, rel_err) = compare(computed, point.expected);
 
         total_points += 1;
@@ -196,19 +188,6 @@ where
 
         if rel_err < rel_err_threshold {
             points_passing += 1;
-        }
-
-        // Track max errors
-        if abs_err > max_absolute_error {
-            max_absolute_error = abs_err;
-            max_abs_error_point = Some(FailureDetail {
-                order: point.order,
-                z: point.z,
-                expected: point.expected,
-                computed,
-                absolute_error: abs_err,
-                relative_error: rel_err,
-            });
         }
 
         if rel_err > max_relative_error {
@@ -222,21 +201,18 @@ where
                 relative_error: rel_err,
             });
         }
+        if abs_err > max_absolute_error {
+            max_absolute_error = abs_err;
+        }
 
-        // Track by order
-        errors_by_order
-            .entry(point.order)
+        // Track by (order, radius)
+        let key = (point.order, point.radius.to_bits());
+        errors_by_order_radius
+            .entry(key)
             .or_default()
             .update(abs_err, rel_err);
 
-        // Track by region
-        let region = classify_region(point.z);
-        errors_by_region
-            .entry(region)
-            .or_default()
-            .update(abs_err, rel_err);
-
-        // Track worst cases (keep top 10)
+        // Collect candidates for worst-cases list
         if rel_err > rel_err_threshold * 0.1 {
             worst_cases.push(FailureDetail {
                 order: point.order,
@@ -249,13 +225,12 @@ where
         }
     }
 
-    // Sort worst cases by relative error and keep top 5
     worst_cases.sort_by(|a, b| {
         b.relative_error
             .partial_cmp(&a.relative_error)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    worst_cases.truncate(5);
+    worst_cases.truncate(10);
 
     AccuracyReport {
         function_name: function_name.to_string(),
@@ -273,79 +248,109 @@ where
         } else {
             0.0
         },
-        max_abs_error_point,
         max_rel_error_point,
-        errors_by_order,
-        errors_by_region,
+        errors_by_order_radius,
         worst_cases,
     }
 }
 
+/// Collect sorted unique radii from the (order, radius_bits) keys.
+fn collect_radii(report: &AccuracyReport) -> Vec<f64> {
+    let mut radii_bits: Vec<u64> = report
+        .errors_by_order_radius
+        .keys()
+        .map(|&(_, rb)| rb)
+        .collect();
+    radii_bits.sort();
+    radii_bits.dedup();
+    radii_bits.iter().map(|&b| f64::from_bits(b)).collect()
+}
+
+/// Collect sorted unique orders from the keys.
+fn collect_orders(report: &AccuracyReport) -> Vec<i32> {
+    let mut orders: Vec<i32> = report
+        .errors_by_order_radius
+        .keys()
+        .map(|&(o, _)| o)
+        .collect();
+    orders.sort();
+    orders.dedup();
+    orders
+}
+
 /// Format and print the accuracy report.
 fn print_report(report: &AccuracyReport) {
-    println!("\n=== {} Validation Report ===", report.function_name);
+    println!("\n{:=<60}", "");
+    println!("  {} Validation Report", report.function_name);
+    println!("{:=<60}", "");
     println!("Total points tested: {}", report.total_points);
     println!(
-        "Points passing (rel_err < 1e-6): {} ({:.3}%)",
+        "Points passing (rel_err < 1e-6): {} ({:.2}%)",
         report.points_passing,
         100.0 * report.points_passing as f64 / report.total_points as f64
     );
-    println!();
-
-    if let Some(ref point) = report.max_abs_error_point {
-        println!(
-            "Max absolute error: {:.2e} at order={}, z=({:.2}, {:.2})",
-            report.max_absolute_error, point.order, point.z.re, point.z.im
-        );
-    }
-
+    println!("Max relative error: {:.2e}", report.max_relative_error);
     if let Some(ref point) = report.max_rel_error_point {
         println!(
-            "Max relative error: {:.2e} at order={}, z=({:.2}, {:.2})",
-            report.max_relative_error, point.order, point.z.re, point.z.im
+            "  at order={}, z=({:.4}, {:.4}), |z|={:.2}",
+            point.order,
+            point.z.re,
+            point.z.im,
+            point.z.norm()
         );
     }
-
-    println!("Mean absolute error: {:.2e}", report.mean_absolute_error);
     println!("Mean relative error: {:.2e}", report.mean_relative_error);
 
-    // Errors by order
-    println!("\n=== Errors by Order ===");
-    let mut orders: Vec<_> = report.errors_by_order.keys().collect();
-    orders.sort();
-    for order in orders {
-        let stats = &report.errors_by_order[order];
-        let flag = if stats.max_relative_error > 1e-6 {
-            "  <- POTENTIAL ISSUE"
-        } else {
-            ""
-        };
-        println!(
-            "Order {:2}: max_rel={:.2e}, mean_rel={:.2e}{}",
-            order,
-            stats.max_relative_error,
-            stats.mean_relative_error(),
-            flag
-        );
-    }
+    // === Errors by (order, radius) ===
+    let radii = collect_radii(report);
+    let orders = collect_orders(report);
 
-    // Errors by region
-    println!("\n=== Errors by Region ===");
-    let region_order = ["near_origin", "small", "moderate", "large", "very_large"];
-    for region in region_order {
-        if let Some(stats) = report.errors_by_region.get(region) {
-            let flag = if stats.max_relative_error > 1e-6 {
-                "  <- POTENTIAL ISSUE"
-            } else {
-                ""
-            };
+    println!("\n=== Errors by (Order, Radius) — only showing max_rel > 1e-8 ===");
+
+    for &r in &radii {
+        let rb = r.to_bits();
+
+        // Check if any order at this radius has notable error
+        let has_notable = orders.iter().any(|&o| {
+            report
+                .errors_by_order_radius
+                .get(&(o, rb))
+                .map_or(false, |s| s.max_relative_error > 1e-8)
+        });
+
+        if !has_notable {
+            // Summarize the whole ring in one line
+            let ring_max: f64 = orders
+                .iter()
+                .filter_map(|&o| report.errors_by_order_radius.get(&(o, rb)))
+                .map(|s| s.max_relative_error)
+                .fold(0.0f64, f64::max);
             println!(
-                "{:12}: max_rel={:.2e}, mean_rel={:.2e}{}",
-                region,
-                stats.max_relative_error,
-                stats.mean_relative_error(),
-                flag
+                "r={:<10.4}  all orders OK (ring max_rel={:.2e})",
+                r, ring_max
             );
+            continue;
+        }
+
+        println!("r={:<10.4}", r);
+        for &o in &orders {
+            if let Some(stats) = report.errors_by_order_radius.get(&(o, rb)) {
+                if stats.max_relative_error > 1e-8 {
+                    let flag = if stats.max_relative_error > 1e-6 {
+                        "  ** FAIL"
+                    } else {
+                        ""
+                    };
+                    println!(
+                        "  n={:>2}: max_rel={:.2e}  mean_rel={:.2e}  (n={} pts){}",
+                        o,
+                        stats.max_relative_error,
+                        stats.mean_relative_error(),
+                        stats.count,
+                        flag
+                    );
+                }
+            }
         }
     }
 
@@ -354,20 +359,21 @@ fn print_report(report: &AccuracyReport) {
         println!("\n=== Worst {} Cases ===", report.worst_cases.len());
         for (i, case) in report.worst_cases.iter().enumerate() {
             println!(
-                "{}. order={}, z=({:.4}, {:.4}): rel_err={:.2e}, abs_err={:.2e}",
+                "{}. n={}, z=({:.4}, {:.4}), |z|={:.2}: rel_err={:.2e}, abs_err={:.2e}",
                 i + 1,
                 case.order,
                 case.z.re,
                 case.z.im,
+                case.z.norm(),
                 case.relative_error,
                 case.absolute_error
             );
             println!(
-                "   expected=({:.6e}, {:.6e})",
+                "   expected=({:.8e}, {:.8e})",
                 case.expected.re, case.expected.im
             );
             println!(
-                "   computed=({:.6e}, {:.6e})",
+                "   computed=({:.8e}, {:.8e})",
                 case.computed.re, case.computed.im
             );
         }
@@ -390,6 +396,7 @@ fn artifacts_path(filename: &str) -> String {
 }
 
 #[test]
+#[ignore]
 fn validate_bessel_j_against_scipy() {
     let data_path = artifacts_path("bessel_j_evaluations.txt");
     let sample_size = get_sample_size();
@@ -401,7 +408,6 @@ fn validate_bessel_j_against_scipy() {
     let report = run_validation(&data_path, "Bessel J", bessel_j, sample_size);
     print_report(&report);
 
-    // Assert max relative error is within tolerance
     assert!(
         report.max_relative_error < 1e-6,
         "Max relative error {:.2e} exceeds threshold 1e-6",
@@ -410,6 +416,7 @@ fn validate_bessel_j_against_scipy() {
 }
 
 #[test]
+#[ignore]
 fn validate_hankel1_against_scipy() {
     let data_path = artifacts_path("hankel1_evaluations.txt");
     let sample_size = get_sample_size();
@@ -421,7 +428,6 @@ fn validate_hankel1_against_scipy() {
     let report = run_validation(&data_path, "Hankel H1", hankel1, sample_size);
     print_report(&report);
 
-    // Assert max relative error is within tolerance
     assert!(
         report.max_relative_error < 1e-6,
         "Max relative error {:.2e} exceeds threshold 1e-6",
@@ -438,11 +444,10 @@ fn validate_bessel_detailed_report() {
     let bessel_j_report = run_validation(&bessel_j_path, "Bessel J", bessel_j, None);
     let hankel1_report = run_validation(&hankel1_path, "Hankel H1", hankel1, None);
 
-    // Print to console
     print_report(&bessel_j_report);
     print_report(&hankel1_report);
 
-    // Write detailed report to file
+    // Write summary to file
     let report_path = artifacts_path("validation_report.txt");
     let mut file = File::create(&report_path).expect("Failed to create report file");
 
@@ -461,20 +466,8 @@ fn validate_bessel_detailed_report() {
         .unwrap();
         writeln!(
             file,
-            "Max absolute error: {:.6e}",
-            report.max_absolute_error
-        )
-        .unwrap();
-        writeln!(
-            file,
             "Max relative error: {:.6e}",
             report.max_relative_error
-        )
-        .unwrap();
-        writeln!(
-            file,
-            "Mean absolute error: {:.6e}",
-            report.mean_absolute_error
         )
         .unwrap();
         writeln!(

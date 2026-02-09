@@ -69,9 +69,9 @@ export interface ScatteringResult {
  */
 export interface FieldResult {
   /** Real part of complex field values (row-major, 1024x1024) */
-  field_real: number[];
+  field_real: Float64Array | number[];
   /** Imaginary part of complex field values */
-  field_imag: number[];
+  field_imag: Float64Array | number[];
   /** Grid size (1024) */
   grid_size: number;
   /** Physical extent of the grid (5.0 means -2.5 to +2.5) */

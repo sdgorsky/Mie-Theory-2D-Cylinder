@@ -1,13 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-
 use scattering_core::field::{compute_field, FieldParams};
-use scattering_core::performance_testing::{
-    create_coord_array, create_coord_array_boxed, create_coord_vec, exterior_field_naive,
-    exterior_field_optimized, exterior_field_spline, exterior_field_spline_symmetric, pw_vec_1,
-    pw_vec_2, pw_vec_3,
-};
 use scattering_core::scattering::{calculate_scattering, Material, Polarization, ScatteringParams};
-fn test_field_calculation() {
+
+fn calculate_field() {
     let params = ScatteringParams {
         wavelength: 1.0,
         material: Material {
@@ -68,34 +63,8 @@ fn test_field_calculation() {
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("Field Benchmark Group");
 
-    group.sample_size(100);
-
-    //group.bench_function("field calc", |b| b.iter(|| test_field_calculation()));
-    //group.bench_function("coord_vec", |b| b.iter(|| create_coord_vec()));
-    //group.bench_function("coord_array", |b| b.iter(|| create_coord_array()));
-    //group.bench_function("coord_array_boxed", |b| b.iter(|| create_coord_array_boxed()));
-
-    group.bench_function("pw_vec_1", |b| b.iter(|| pw_vec_1()));
-    group.bench_function("pw_vec_2", |b| b.iter(|| pw_vec_2()));
-    group.bench_function("pw_vec_3", |b| b.iter(|| pw_vec_3()));
-
-    // Exterior field benchmarks need fewer samples due to long runtime
     group.sample_size(10);
-    group.bench_function("exterior_field_naive", |b| {
-        b.iter(|| exterior_field_naive())
-    });
-    group.bench_function("exterior_field_optimized", |b| {
-        b.iter(|| exterior_field_optimized())
-    });
-    group.bench_function("exterior_field_spline", |b| {
-        b.iter(|| exterior_field_spline())
-    });
-    group.bench_function("exterior_field_spline_sym", |b| {
-        b.iter(|| exterior_field_spline_symmetric())
-    });
-
-    // group.bench_function("pw_array", |b| b.iter(|| pw_array()));
-    // group.bench_function("pw_array_boxed", |b| b.iter(|| pw_array_boxed()));
+    group.bench_function("calculate_field", |b| b.iter(|| calculate_field()));
 
     group.finish();
 }
