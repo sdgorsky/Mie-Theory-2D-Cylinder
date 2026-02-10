@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { CylinderControls } from "./components/CylinderControls";
 import { FieldVisualization } from "./components/FieldVisualization";
 import { useScattering } from "./hooks/useScattering";
@@ -25,6 +25,8 @@ function App() {
     computeAll,
     recolor,
   } = useScattering();
+
+  const [showOverlay, setShowOverlay] = useState(true);
 
   // Called on every slider event — non-blocking, posts to worker.
   // No setState here: CylinderControls owns its own display state,
@@ -64,6 +66,7 @@ function App() {
             imageStats={imageStats}
             hasImage={hasImage}
             polarization={displayParams.polarization}
+            showOverlay={showOverlay}
             onModeChange={recolor}
             width={512}
             height={512}
@@ -106,6 +109,7 @@ function App() {
         <div className="controls-panel">
           <CylinderControls
             onChange={handleParamsChange}
+            onShowOverlayChange={setShowOverlay}
             bounds={parameterBounds}
           />
         </div>

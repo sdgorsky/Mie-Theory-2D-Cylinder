@@ -11,13 +11,16 @@ import "./CylinderControls.css";
 
 interface CylinderControlsProps {
   onChange: (params: ScatteringParams) => void;
+  onShowOverlayChange: (show: boolean) => void;
   bounds: ParameterBounds | null;
 }
 
 export const CylinderControls = memo(function CylinderControls({
   onChange,
+  onShowOverlayChange,
   bounds,
 }: CylinderControlsProps) {
+  const [showOverlay, setShowOverlay] = useState(true);
   // CylinderControls owns its state — no params prop means React.memo blocks
   // all parent re-renders (onChange is a stable ref-writing callback).
   const [local, setLocal] = useState(createDefaultParams);
@@ -231,6 +234,18 @@ export const CylinderControls = memo(function CylinderControls({
             />
           </div>
         </div>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={!showOverlay}
+            onChange={(e) => {
+              const hide = e.target.checked;
+              setShowOverlay(!hide);
+              onShowOverlayChange(!hide);
+            }}
+          />
+          Hide cylinder overlay
+        </label>
       </details>
     </div>
   );

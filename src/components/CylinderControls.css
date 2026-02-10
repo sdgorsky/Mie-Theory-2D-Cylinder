@@ -45,6 +45,16 @@
   margin-bottom: 0;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #b0b0b0;
+  font-size: 0.85rem;
+  cursor: pointer;
+  margin-top: 0.75rem;
+}
+
 .section-label {
   display: block;
   font-weight: 600;
