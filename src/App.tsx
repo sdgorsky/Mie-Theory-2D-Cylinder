@@ -16,6 +16,7 @@ function App() {
     isLoading,
     isReady,
     error,
+    parameterBounds,
     scatteringResult,
     computedParams,
     imageStats,
@@ -103,7 +104,10 @@ function App() {
         </div>
 
         <div className="controls-panel">
-          <CylinderControls onChange={handleParamsChange} />
+          <CylinderControls
+            onChange={handleParamsChange}
+            bounds={parameterBounds}
+          />
         </div>
       </main>
     </div>

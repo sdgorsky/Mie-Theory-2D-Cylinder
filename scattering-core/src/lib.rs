@@ -4,7 +4,12 @@ pub mod scattering;
 mod utils;
 
 use field::{compute_field, FieldParams, GRID_SIZE, VIEW_SIZE};
-use scattering::{calculate_scattering, Material, Polarization, ScatteringParams};
+use scattering::{
+    calculate_scattering, Material, Polarization, ScatteringParams, MAX_ORDER_MAX, MAX_ORDER_MIN,
+    PERMEABILITY_IM_MAX, PERMEABILITY_IM_MIN, PERMEABILITY_RE_MAX, PERMEABILITY_RE_MIN,
+    PERMITTIVITY_IM_MAX, PERMITTIVITY_IM_MIN, PERMITTIVITY_RE_MAX, PERMITTIVITY_RE_MIN,
+    WAVELENGTH_MAX, WAVELENGTH_MIN,
+};
 use wasm_bindgen::prelude::*;
 
 /// Initialize panic hook for better error messages in browser console.
@@ -140,6 +145,65 @@ pub fn get_field_grid_size() -> usize {
 #[wasm_bindgen]
 pub fn get_field_view_size() -> f64 {
     VIEW_SIZE
+}
+
+/// Get parameter bounds (single source of truth for UI sliders).
+#[wasm_bindgen]
+pub fn get_parameter_bounds() -> JsValue {
+    let obj = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"wavelength_min".into(),
+        &JsValue::from(WAVELENGTH_MIN),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"wavelength_max".into(),
+        &JsValue::from(WAVELENGTH_MAX),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"permittivity_re_min".into(),
+        &JsValue::from(PERMITTIVITY_RE_MIN),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"permittivity_re_max".into(),
+        &JsValue::from(PERMITTIVITY_RE_MAX),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"permittivity_im_min".into(),
+        &JsValue::from(PERMITTIVITY_IM_MIN),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"permittivity_im_max".into(),
+        &JsValue::from(PERMITTIVITY_IM_MAX),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"permeability_re_min".into(),
+        &JsValue::from(PERMEABILITY_RE_MIN),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"permeability_re_max".into(),
+        &JsValue::from(PERMEABILITY_RE_MAX),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"permeability_im_min".into(),
+        &JsValue::from(PERMEABILITY_IM_MIN),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"permeability_im_max".into(),
+        &JsValue::from(PERMEABILITY_IM_MAX),
+    );
+    let _ = js_sys::Reflect::set(&obj, &"max_order_min".into(), &JsValue::from(MAX_ORDER_MIN));
+    let _ = js_sys::Reflect::set(&obj, &"max_order_max".into(), &JsValue::from(MAX_ORDER_MAX));
+    obj.into()
 }
 
 /// Combined scattering + field computation that writes directly into

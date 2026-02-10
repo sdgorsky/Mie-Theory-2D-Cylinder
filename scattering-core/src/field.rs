@@ -444,16 +444,29 @@ fn linspace(start: f64, end: f64, n_points: usize) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scattering::{calculate_scattering, Material, Polarization, ScatteringParams};
+    use crate::scattering::{
+        calculate_scattering, Material, Polarization, ScatteringParams, PERMEABILITY_IM_MAX,
+        PERMEABILITY_IM_MIN, PERMEABILITY_RE_MAX, PERMEABILITY_RE_MIN, PERMITTIVITY_IM_MAX,
+        PERMITTIVITY_IM_MIN, PERMITTIVITY_RE_MAX, PERMITTIVITY_RE_MIN, WAVELENGTH_MAX,
+        WAVELENGTH_MIN,
+    };
 
     /// Sweep permittivity, permeability, and wavelength to verify the boundary
     /// condition: interior and exterior fields must match at the cylinder surface.
-    /// 4 points in [-5,5] for each of (eps_re, eps_im, mu_re, mu_im) × 3 wavelengths
-    /// = 4^4 × 3 = 768 configurations.
+    /// Sweep ranges are derived from the UI parameter bounds (single source of truth),
+    /// clamped to a sub-range where Bessel function arguments stay within our
+    /// implementation's precision threshold.
     #[test]
     fn test_tm_boundary_condition() {
-        let sweep: Vec<f64> = linspace(-5.0, 5.0, 4);
-        let wavelengths = [0.3, 1.0, 10.0];
+        let sweep_eps_re = linspace(PERMITTIVITY_RE_MIN, PERMITTIVITY_RE_MAX, 4);
+        let sweep_eps_im = linspace(PERMITTIVITY_IM_MIN, PERMITTIVITY_IM_MAX, 4);
+        let sweep_mu_re = linspace(PERMEABILITY_RE_MIN, PERMEABILITY_RE_MAX, 4);
+        let sweep_mu_im = linspace(PERMEABILITY_IM_MIN, PERMEABILITY_IM_MAX, 4);
+        let wavelengths = [
+            WAVELENGTH_MIN.max(0.3),
+            (WAVELENGTH_MIN + WAVELENGTH_MAX) / 2.0,
+            WAVELENGTH_MAX,
+        ];
         let max_order = 21;
         let theta_vec = linspace(0.0, 2.0 * PI, 20);
         let tol = 1e-5;
@@ -463,10 +476,10 @@ mod tests {
         let mut worst_err = 0.0_f64;
         let mut worst_config = String::new();
 
-        for &eps_re in &sweep {
-            for &eps_im in &sweep {
-                for &mu_re in &sweep {
-                    for &mu_im in &sweep {
+        for &eps_re in &sweep_eps_re {
+            for &eps_im in &sweep_eps_im {
+                for &mu_re in &sweep_mu_re {
+                    for &mu_im in &sweep_mu_im {
                         for &wl in &wavelengths {
                             n_configs += 1;
 
@@ -520,7 +533,15 @@ mod tests {
             }
         }
 
-        assert_eq!(n_configs, 768, "Expected 768 configurations");
+        let expected_configs = sweep_eps_re.len()
+            * sweep_eps_im.len()
+            * sweep_mu_re.len()
+            * sweep_mu_im.len()
+            * wavelengths.len();
+        assert_eq!(
+            n_configs as usize, expected_configs,
+            "Unexpected config count"
+        );
 
         assert_eq!(
             n_failures, 0,
@@ -529,13 +550,20 @@ mod tests {
         );
     }
 
-    /// TE polarization sweep — same 768 configurations as TM.
+    /// TE polarization sweep — same configurations as TM.
     /// Exercises the TE branch in calculate_coefficients_for_order.
     #[test]
     fn test_te_boundary_condition() {
-        let sweep: Vec<f64> = linspace(-5.0, 5.0, 4);
-        let wavelengths = [0.5, 1.0, 10.0];
-        let max_order = 20;
+        let sweep_eps_re = linspace(PERMITTIVITY_RE_MIN, PERMITTIVITY_RE_MAX, 4);
+        let sweep_eps_im = linspace(PERMITTIVITY_IM_MIN, PERMITTIVITY_IM_MAX, 4);
+        let sweep_mu_re = linspace(PERMEABILITY_RE_MIN, PERMEABILITY_RE_MAX, 4);
+        let sweep_mu_im = linspace(PERMEABILITY_IM_MIN, PERMEABILITY_IM_MAX, 4);
+        let wavelengths = [
+            WAVELENGTH_MIN.max(0.3),
+            (WAVELENGTH_MIN + WAVELENGTH_MAX) / 2.0,
+            WAVELENGTH_MAX,
+        ];
+        let max_order = 21;
         let theta_vec = linspace(0.0, 2.0 * PI, 20);
         let tol = 1e-5;
 
@@ -544,10 +572,10 @@ mod tests {
         let mut worst_err = 0.0_f64;
         let mut worst_config = String::new();
 
-        for &eps_re in &sweep {
-            for &eps_im in &sweep {
-                for &mu_re in &sweep {
-                    for &mu_im in &sweep {
+        for &eps_re in &sweep_eps_re {
+            for &eps_im in &sweep_eps_im {
+                for &mu_re in &sweep_mu_re {
+                    for &mu_im in &sweep_mu_im {
                         for &wl in &wavelengths {
                             n_configs += 1;
 
@@ -601,7 +629,15 @@ mod tests {
             }
         }
 
-        assert_eq!(n_configs, 768, "Expected 768 configurations");
+        let expected_configs = sweep_eps_re.len()
+            * sweep_eps_im.len()
+            * sweep_mu_re.len()
+            * sweep_mu_im.len()
+            * wavelengths.len();
+        assert_eq!(
+            n_configs as usize, expected_configs,
+            "Unexpected config count"
+        );
 
         assert_eq!(
             n_failures, 0,
@@ -611,8 +647,6 @@ mod tests {
     }
 
     fn test_field_values_nonzero() {
-        use crate::scattering::{calculate_scattering, Material, Polarization, ScatteringParams};
-
         let params = ScatteringParams {
             wavelength: 1.0,
             material: Material {

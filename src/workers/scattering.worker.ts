@@ -2,6 +2,7 @@ import init, {
   compute_all,
   get_field_grid_size,
   get_field_view_size,
+  get_parameter_bounds,
 } from "scattering-core";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -21,6 +22,21 @@ export interface ComputeParams {
 export interface ImageStats {
   min: number;
   max: number;
+}
+
+export interface ParameterBounds {
+  wavelength_min: number;
+  wavelength_max: number;
+  permittivity_re_min: number;
+  permittivity_re_max: number;
+  permittivity_im_min: number;
+  permittivity_im_max: number;
+  permeability_re_min: number;
+  permeability_re_max: number;
+  permeability_im_min: number;
+  permeability_im_max: number;
+  max_order_min: number;
+  max_order_max: number;
 }
 
 export interface ScatteringMeta {
@@ -44,7 +60,7 @@ export type WorkerRequest =
     };
 
 export type WorkerResponse =
-  | { type: "ready" }
+  | { type: "ready"; bounds: ParameterBounds }
   | {
       type: "result";
       scattering: ScatteringMeta;
@@ -270,8 +286,10 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       fieldRealBuf = new Float64Array(n);
       fieldImagBuf = new Float64Array(n);
 
+      const bounds = get_parameter_bounds();
       (self as unknown as Worker).postMessage({
         type: "ready",
+        bounds,
       } satisfies WorkerResponse);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

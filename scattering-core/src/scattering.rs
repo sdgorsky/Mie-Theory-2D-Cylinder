@@ -68,6 +68,20 @@ pub struct ScatteringResult {
 /// Cylinder radius (diameter = 1, so radius = 0.5)
 pub const RADIUS: f64 = 0.5;
 
+// Parameter bounds — single source of truth for UI sliders and tests
+pub const WAVELENGTH_MIN: f64 = 0.3;
+pub const WAVELENGTH_MAX: f64 = 5.0;
+pub const PERMITTIVITY_RE_MIN: f64 = -5.0;
+pub const PERMITTIVITY_RE_MAX: f64 = 5.0;
+pub const PERMITTIVITY_IM_MIN: f64 = -5.0;
+pub const PERMITTIVITY_IM_MAX: f64 = 5.0;
+pub const PERMEABILITY_RE_MIN: f64 = -5.0;
+pub const PERMEABILITY_RE_MAX: f64 = 5.0;
+pub const PERMEABILITY_IM_MIN: f64 = -5.0;
+pub const PERMEABILITY_IM_MAX: f64 = 5.0;
+pub const MAX_ORDER_MIN: i32 = 1;
+pub const MAX_ORDER_MAX: i32 = 50;
+
 /// Calculate scattering coefficients for a 2D cylinder.
 ///
 /// The cylinder has diameter = 1 (unitless), centered at the origin.

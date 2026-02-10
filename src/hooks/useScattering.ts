@@ -4,6 +4,7 @@ import type { ScatteringParams } from "../types/cylinder";
 import type {
   ComputeParams,
   ImageStats,
+  ParameterBounds,
   ScatteringMeta,
   VisualizationMode,
   WorkerRequest,
@@ -13,6 +14,7 @@ import type {
 export type {
   VisualizationMode,
   ImageStats,
+  ParameterBounds,
   ScatteringMeta,
 } from "../workers/scattering.worker";
 
@@ -42,6 +44,7 @@ export interface UseScatteringResult {
   isLoading: boolean;
   isReady: boolean;
   error: string | null;
+  parameterBounds: ParameterBounds | null;
   scatteringResult: ScatteringMeta | null;
   computedParams: ScatteringParams | null;
   imageStats: ImageStats | null;
@@ -67,6 +70,8 @@ export function useScattering(): UseScatteringResult {
   const [isLoading, setIsLoading] = useState(true);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [parameterBounds, setParameterBounds] =
+    useState<ParameterBounds | null>(null);
   const [meta, setMeta] = useState<MetaState>(INITIAL_META);
 
   const workerRef = useRef<Worker | null>(null);
@@ -234,6 +239,7 @@ export function useScattering(): UseScatteringResult {
       const msg = e.data;
 
       if (msg.type === "ready") {
+        setParameterBounds(msg.bounds);
         setIsReady(true);
         setIsLoading(false);
       } else if (msg.type === "result") {
@@ -291,6 +297,7 @@ export function useScattering(): UseScatteringResult {
     isLoading,
     isReady,
     error,
+    parameterBounds,
     scatteringResult: meta.scatteringResult,
     computedParams: meta.computedParams,
     imageStats: meta.imageStats,

@@ -5,20 +5,22 @@ import type {
   Polarization,
 } from "../types/cylinder";
 import { createDefaultParams, calculateSizeParameter } from "../types/cylinder";
+import type { ParameterBounds } from "../hooks/useScattering";
 import "./CylinderControls.css";
 
 interface CylinderControlsProps {
   onChange: (params: ScatteringParams) => void;
+  bounds: ParameterBounds | null;
 }
 
 interface ComplexInputProps {
   label: string;
   value: ComplexObj;
   onChange: (value: ComplexObj) => void;
-  realMin?: number;
-  realMax?: number;
-  imagMin?: number;
-  imagMax?: number;
+  realMin: number;
+  realMax: number;
+  imagMin: number;
+  imagMax: number;
   realStep?: number;
   imagStep?: number;
 }
@@ -27,10 +29,10 @@ function ComplexInput({
   label,
   value,
   onChange,
-  realMin = -10,
-  realMax = 10,
-  imagMin = -10,
-  imagMax = 10,
+  realMin,
+  realMax,
+  imagMin,
+  imagMax,
   realStep = 0.1,
   imagStep = 0.1,
 }: ComplexInputProps) {
@@ -91,6 +93,7 @@ function ComplexInput({
 
 export const CylinderControls = memo(function CylinderControls({
   onChange,
+  bounds,
 }: CylinderControlsProps) {
   // CylinderControls owns its state — no params prop means React.memo blocks
   // all parent re-renders (onChange is a stable ref-writing callback).
@@ -127,6 +130,16 @@ export const CylinderControls = memo(function CylinderControls({
     });
   };
 
+  // Wait for WASM bounds before rendering controls
+  if (!bounds) {
+    return (
+      <div className="cylinder-controls">
+        <h2>Simulation Parameters</h2>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
   const sizeParameter = calculateSizeParameter(local.wavelength);
 
   return (
@@ -139,20 +152,22 @@ export const CylinderControls = memo(function CylinderControls({
         <div className="wavelength-control">
           <input
             type="range"
-            min={0.1}
-            max={5}
+            min={bounds.wavelength_min}
+            max={bounds.wavelength_max}
             step={0.01}
             value={local.wavelength}
             onChange={(e) => updateWavelength(parseFloat(e.target.value))}
           />
           <input
             type="number"
-            min={0.01}
-            max={10}
+            min={bounds.wavelength_min}
+            max={bounds.wavelength_max}
             step={0.01}
             value={local.wavelength}
             onChange={(e) =>
-              updateWavelength(parseFloat(e.target.value) || 0.1)
+              updateWavelength(
+                parseFloat(e.target.value) || bounds.wavelength_min,
+              )
             }
           />
         </div>
@@ -185,19 +200,21 @@ export const CylinderControls = memo(function CylinderControls({
         <div className="order-control">
           <input
             type="range"
-            min={1}
-            max={30}
+            min={bounds.max_order_min}
+            max={bounds.max_order_max}
             step={1}
             value={local.maxOrder}
             onChange={(e) => updateMaxOrder(parseInt(e.target.value))}
           />
           <input
             type="number"
-            min={1}
-            max={50}
+            min={bounds.max_order_min}
+            max={bounds.max_order_max}
             step={1}
             value={local.maxOrder}
-            onChange={(e) => updateMaxOrder(parseInt(e.target.value) || 1)}
+            onChange={(e) =>
+              updateMaxOrder(parseInt(e.target.value) || bounds.max_order_min)
+            }
           />
         </div>
         <div className="derived-value">Terms: {2 * local.maxOrder + 1}</div>
@@ -208,10 +225,10 @@ export const CylinderControls = memo(function CylinderControls({
           label="Relative Permittivity (εᵣ)"
           value={local.material.permittivity}
           onChange={updatePermittivity}
-          realMin={-10}
-          realMax={20}
-          imagMin={-5}
-          imagMax={5}
+          realMin={bounds.permittivity_re_min}
+          realMax={bounds.permittivity_re_max}
+          imagMin={bounds.permittivity_im_min}
+          imagMax={bounds.permittivity_im_max}
         />
       </div>
 
@@ -220,10 +237,10 @@ export const CylinderControls = memo(function CylinderControls({
           label="Relative Permeability (μᵣ)"
           value={local.material.permeability}
           onChange={updatePermeability}
-          realMin={-10}
-          realMax={10}
-          imagMin={-5}
-          imagMax={5}
+          realMin={bounds.permeability_re_min}
+          realMax={bounds.permeability_re_max}
+          imagMin={bounds.permeability_im_min}
+          imagMax={bounds.permeability_im_max}
         />
       </div>
     </div>
