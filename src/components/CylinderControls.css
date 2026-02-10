@@ -49,6 +49,7 @@
 .advanced-section > summary {
   cursor: pointer;
   list-style: none;
+  color: #e0e0e0;
 }
 
 .advanced-section > summary::-webkit-details-marker {

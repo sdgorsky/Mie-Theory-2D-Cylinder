@@ -103,7 +103,7 @@ export function createDefaultParams(): ScatteringParams {
       permeability: { re: 1.0, im: 0.0 },
     },
     polarization: "TM",
-    maxOrder: 10,
+    maxOrder: 21,
   };
 }
 
