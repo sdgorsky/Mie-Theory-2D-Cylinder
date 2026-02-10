@@ -68,7 +68,16 @@ export const CylinderControls = memo(function CylinderControls({
 
   return (
     <div className="cylinder-controls">
-      <h2>Simulation Parameters</h2>
+      <div className="controls-header">
+        <h2>Simulation Parameters</h2>
+        <button
+          className="reset-button"
+          title="Reset simulation to default settings"
+          onClick={() => update(createDefaultParams())}
+        >
+          ↻
+        </button>
+      </div>
 
       <div className="control-section">
         <label className="section-label">Polarization</label>

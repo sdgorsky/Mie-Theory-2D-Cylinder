@@ -141,9 +141,9 @@ export function calculateRefractiveIndex(
 /**
  * Format a complex number for display.
  */
-export function formatComplex(c: ComplexObj): string {
-  const realStr = c.re.toFixed(3);
-  const imagAbs = Math.abs(c.im).toFixed(3);
+export function formatComplex(c: ComplexObj, decimals = 3): string {
+  const realStr = c.re.toFixed(decimals);
+  const imagAbs = Math.abs(c.im).toFixed(decimals);
   const sign = c.im >= 0 ? "+" : "-";
   return `${realStr} ${sign} ${imagAbs}i`;
 }

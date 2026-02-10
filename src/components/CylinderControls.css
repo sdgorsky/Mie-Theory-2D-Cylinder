@@ -7,12 +7,35 @@
   max-width: 400px;
 }
 
-.cylinder-controls h2 {
-  margin: 0 0 1.5rem 0;
-  font-size: 1.2rem;
-  color: #e0e0e0;
+.controls-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
   border-bottom: 1px solid #333;
   padding-bottom: 0.5rem;
+}
+
+.controls-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #e0e0e0;
+}
+
+.reset-button {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.reset-button:hover {
+  color: #e0e0e0;
 }
 
 .control-section {

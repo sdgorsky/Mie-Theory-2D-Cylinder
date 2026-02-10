@@ -4,7 +4,6 @@ import { FieldVisualization } from "./components/FieldVisualization";
 import { useScattering } from "./hooks/useScattering";
 import {
   createDefaultParams,
-  calculateSizeParameter,
   calculateRefractiveIndex,
   formatComplex,
 } from "./types/cylinder";
@@ -82,20 +81,19 @@ function App() {
           <div className="scattering-info">
             <h3>Scattering Info</h3>
             <p>
-              Size parameter: x ={" "}
-              {calculateSizeParameter(displayParams.wavelength).toFixed(4)}
-            </p>
-            <p>
               Permittivity: εᵣ ={" "}
-              {formatComplex(displayParams.material.permittivity)}
+              {formatComplex(displayParams.material.permittivity, 1)}
             </p>
             <p>
               Permeability: μᵣ ={" "}
-              {formatComplex(displayParams.material.permeability)}
+              {formatComplex(displayParams.material.permeability, 1)}
             </p>
             <p>
               Refractive index: n ={" "}
-              {formatComplex(calculateRefractiveIndex(displayParams.material))}
+              {formatComplex(
+                calculateRefractiveIndex(displayParams.material),
+                2,
+              )}
             </p>
             {scatteringResult && (
               <p>
