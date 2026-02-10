@@ -446,166 +446,244 @@ mod tests {
     use super::*;
     use crate::scattering::{calculate_scattering, Material, Polarization, ScatteringParams};
 
+    /// Sweep permittivity, permeability, and wavelength to verify the boundary
+    /// condition: interior and exterior fields must match at the cylinder surface.
+    /// 4 points in [-5,5] for each of (eps_re, eps_im, mu_re, mu_im) × 3 wavelengths
+    /// = 4^4 × 3 = 768 configurations.
     #[test]
-    fn test_dielectric_tm() {
+    fn test_tm_boundary_condition() {
+        let sweep: Vec<f64> = linspace(-5.0, 5.0, 4);
+        let wavelengths = [0.3, 1.0, 10.0];
+        let max_order = 21;
+        let theta_vec = linspace(0.0, 2.0 * PI, 20);
+        let tol = 1e-5;
+
+        let mut n_configs = 0u32;
+        let mut n_failures = 0u32;
+        let mut worst_err = 0.0_f64;
+        let mut worst_config = String::new();
+
+        for &eps_re in &sweep {
+            for &eps_im in &sweep {
+                for &mu_re in &sweep {
+                    for &mu_im in &sweep {
+                        for &wl in &wavelengths {
+                            n_configs += 1;
+
+                            let params = ScatteringParams {
+                                wavelength: wl,
+                                material: Material {
+                                    permittivity_real: eps_re,
+                                    permittivity_imag: eps_im,
+                                    permeability_real: mu_re,
+                                    permeability_imag: mu_im,
+                                },
+                                polarization: Polarization::TM,
+                                max_order,
+                            };
+
+                            let result = calculate_scattering(&params);
+                            let k0 = 2.0 * PI / wl;
+                            let kn = Complex64::new(k0, 0.0) * params.material.refractive_index();
+
+                            let mut max_diff = 0.0_f64;
+                            for &theta in &theta_vec {
+                                let ext = compute_exterior_field(
+                                    &result.scattering_coefficients,
+                                    &result.orders,
+                                    k0,
+                                    RADIUS,
+                                    theta,
+                                );
+                                let int = compute_interior_field(
+                                    &result.internal_coefficients,
+                                    &result.orders,
+                                    kn,
+                                    RADIUS,
+                                    theta,
+                                );
+                                max_diff = max_diff.max((int - ext).norm());
+                            }
+
+                            if max_diff > tol {
+                                n_failures += 1;
+                                if max_diff > worst_err {
+                                    worst_err = max_diff;
+                                    worst_config = format!(
+                                        "wl={wl} eps=({eps_re},{eps_im}) mu=({mu_re},{mu_im})"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assert_eq!(n_configs, 768, "Expected 768 configurations");
+
+        assert_eq!(
+            n_failures, 0,
+            "{n_failures}/{n_configs} configs exceed tol {tol:.0e}. \
+             Worst error: {worst_err:.4e} at [{worst_config}]"
+        );
+    }
+
+    /// TE polarization sweep — same 768 configurations as TM.
+    /// Exercises the TE branch in calculate_coefficients_for_order.
+    #[test]
+    fn test_te_boundary_condition() {
+        let sweep: Vec<f64> = linspace(-5.0, 5.0, 4);
+        let wavelengths = [0.5, 1.0, 10.0];
+        let max_order = 20;
+        let theta_vec = linspace(0.0, 2.0 * PI, 20);
+        let tol = 1e-5;
+
+        let mut n_configs = 0u32;
+        let mut n_failures = 0u32;
+        let mut worst_err = 0.0_f64;
+        let mut worst_config = String::new();
+
+        for &eps_re in &sweep {
+            for &eps_im in &sweep {
+                for &mu_re in &sweep {
+                    for &mu_im in &sweep {
+                        for &wl in &wavelengths {
+                            n_configs += 1;
+
+                            let params = ScatteringParams {
+                                wavelength: wl,
+                                material: Material {
+                                    permittivity_real: eps_re,
+                                    permittivity_imag: eps_im,
+                                    permeability_real: mu_re,
+                                    permeability_imag: mu_im,
+                                },
+                                polarization: Polarization::TE,
+                                max_order,
+                            };
+
+                            let result = calculate_scattering(&params);
+                            let k0 = 2.0 * PI / wl;
+                            let kn = Complex64::new(k0, 0.0) * params.material.refractive_index();
+
+                            let mut max_diff = 0.0_f64;
+                            for &theta in &theta_vec {
+                                let ext = compute_exterior_field(
+                                    &result.scattering_coefficients,
+                                    &result.orders,
+                                    k0,
+                                    RADIUS,
+                                    theta,
+                                );
+                                let int = compute_interior_field(
+                                    &result.internal_coefficients,
+                                    &result.orders,
+                                    kn,
+                                    RADIUS,
+                                    theta,
+                                );
+                                max_diff = max_diff.max((int - ext).norm());
+                            }
+
+                            if max_diff > tol {
+                                n_failures += 1;
+                                if max_diff > worst_err {
+                                    worst_err = max_diff;
+                                    worst_config = format!(
+                                        "wl={wl} eps=({eps_re},{eps_im}) mu=({mu_re},{mu_im})"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assert_eq!(n_configs, 768, "Expected 768 configurations");
+
+        assert_eq!(
+            n_failures, 0,
+            "{n_failures}/{n_configs} configs exceed tol {tol:.0e}. \
+             Worst error: {worst_err:.4e} at [{worst_config}]"
+        );
+    }
+
+    fn test_field_values_nonzero() {
+        use crate::scattering::{calculate_scattering, Material, Polarization, ScatteringParams};
+
         let params = ScatteringParams {
             wavelength: 1.0,
             material: Material {
                 permittivity_real: 4.0,
-                permittivity_imag: 0.0,
+                permittivity_imag: 0.5,
                 permeability_real: 1.0,
-                permeability_imag: 0.0,
+                permeability_imag: -0.2,
             },
             polarization: Polarization::TM,
             max_order: 10,
         };
 
-        let result = calculate_scattering(&params);
-        let theta_vec = linspace(0.0, 2.0 * PI, 5);
+        let scattering = calculate_scattering(&params);
 
-        let k0 = Complex64::new(2.0 * PI / params.wavelength, 0.0);
-        let kn: Complex64 = k0 * params.material.refractive_index();
+        // Build field params
+        let field_params = FieldParams {
+            wavelength: params.wavelength,
+            permittivity_real: params.material.permittivity_real,
+            permittivity_imag: params.material.permittivity_imag,
+            permeability_real: params.material.permeability_real,
+            permeability_imag: params.material.permeability_imag,
+            incident_coeffs_real: scattering
+                .incident_coefficients
+                .iter()
+                .map(|c| c.re)
+                .collect(),
+            incident_coeffs_imag: scattering
+                .incident_coefficients
+                .iter()
+                .map(|c| c.im)
+                .collect(),
+            scattering_coeffs_real: scattering
+                .scattering_coefficients
+                .iter()
+                .map(|c| c.re)
+                .collect(),
+            scattering_coeffs_imag: scattering
+                .scattering_coefficients
+                .iter()
+                .map(|c| c.im)
+                .collect(),
+            internal_coeffs_real: scattering
+                .internal_coefficients
+                .iter()
+                .map(|c| c.re)
+                .collect(),
+            internal_coeffs_imag: scattering
+                .internal_coefficients
+                .iter()
+                .map(|c| c.im)
+                .collect(),
+            orders: scattering.orders,
+        };
 
-        let mut phiz_ext: Vec<Complex64> = Vec::new();
-        let mut phiz_int: Vec<Complex64> = Vec::new();
+        let result = compute_field(&field_params);
 
-        for theta in theta_vec.iter() {
-            phiz_ext.push(compute_exterior_field(
-                &result.scattering_coefficients,
-                &result.orders,
-                k0.re,
-                RADIUS,
-                *theta,
-            ));
-            phiz_int.push(compute_interior_field(
-                &result.internal_coefficients,
-                &result.orders,
-                kn,
-                RADIUS,
-                *theta,
-            ));
+        // Check that we have non-trivial field values
+        let mut min_mag = f64::MAX;
+        let mut max_mag = f64::MIN;
+
+        for i in 0..result.field_real.len() {
+            let mag = (result.field_real[i].powi(2) + result.field_imag[i].powi(2)).sqrt();
+            min_mag = min_mag.min(mag);
+            max_mag = max_mag.max(mag);
         }
 
-        for field in &phiz_ext {
-            let magnitude = field.norm();
-            assert!(
-                magnitude > 1e-10,
-                "Expected non-zero exterior field value, got {:.4e}",
-                magnitude
-            );
-        }
-        for field in &phiz_int {
-            let magnitude = field.norm();
-            assert!(
-                magnitude > 1e-10,
-                "Expected non-zero interior field value, got {:.4e}",
-                magnitude
-            );
-        }
-
-        for (i, (ei, ee)) in phiz_int.iter().zip(phiz_ext.iter()).enumerate() {
-            let diff = ei - ee;
-            assert!(
-                diff.norm() < 1e-5,
-                "Expected small difference in interior and exterior field, got {i}:{:.4e}",
-                diff.norm()
-            );
-        }
+        assert!(max_mag > min_mag, "Field should have variation");
+        assert!(
+            max_mag > 0.1,
+            "Field maximum should be significant, got {}",
+            max_mag
+        );
     }
-}
-
-#[test]
-fn test_field_values_nonzero() {
-    use crate::scattering::{calculate_scattering, Material, Polarization, ScatteringParams};
-
-    let params = ScatteringParams {
-        wavelength: 1.0,
-        material: Material {
-            permittivity_real: 4.0,
-            permittivity_imag: 0.0,
-            permeability_real: 1.0,
-            permeability_imag: 0.0,
-        },
-        polarization: Polarization::TM,
-        max_order: 10,
-    };
-
-    let scattering = calculate_scattering(&params);
-
-    // Build field params
-    let field_params = FieldParams {
-        wavelength: params.wavelength,
-        permittivity_real: params.material.permittivity_real,
-        permittivity_imag: params.material.permittivity_imag,
-        permeability_real: params.material.permeability_real,
-        permeability_imag: params.material.permeability_imag,
-        incident_coeffs_real: scattering
-            .incident_coefficients
-            .iter()
-            .map(|c| c.re)
-            .collect(),
-        incident_coeffs_imag: scattering
-            .incident_coefficients
-            .iter()
-            .map(|c| c.im)
-            .collect(),
-        scattering_coeffs_real: scattering
-            .scattering_coefficients
-            .iter()
-            .map(|c| c.re)
-            .collect(),
-        scattering_coeffs_imag: scattering
-            .scattering_coefficients
-            .iter()
-            .map(|c| c.im)
-            .collect(),
-        internal_coeffs_real: scattering
-            .internal_coefficients
-            .iter()
-            .map(|c| c.re)
-            .collect(),
-        internal_coeffs_imag: scattering
-            .internal_coefficients
-            .iter()
-            .map(|c| c.im)
-            .collect(),
-        orders: scattering.orders,
-    };
-
-    let result = compute_field(&field_params);
-
-    // Check that we have non-trivial field values
-    let mut min_mag = f64::MAX;
-    let mut max_mag = f64::MIN;
-
-    for i in 0..result.field_real.len() {
-        let mag = (result.field_real[i].powi(2) + result.field_imag[i].powi(2)).sqrt();
-        min_mag = min_mag.min(mag);
-        max_mag = max_mag.max(mag);
-    }
-
-    println!("Field magnitude range: [{}, {}]", min_mag, max_mag);
-    println!("Grid size: {}", result.grid_size);
-    println!("Sample values at corners:");
-    println!(
-        "  [0,0]: {} + {}i",
-        result.field_real[0], result.field_imag[0]
-    );
-    let last = result.grid_size * result.grid_size - 1;
-    println!(
-        "  [N,N]: {} + {}i",
-        result.field_real[last], result.field_imag[last]
-    );
-    let center = result.grid_size / 2 * result.grid_size + result.grid_size / 2;
-    println!(
-        "  center: {} + {}i",
-        result.field_real[center], result.field_imag[center]
-    );
-
-    assert!(max_mag > min_mag, "Field should have variation");
-    assert!(
-        max_mag > 0.1,
-        "Field maximum should be significant, got {}",
-        max_mag
-    );
 }

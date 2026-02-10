@@ -14,11 +14,11 @@ const EULER_GAMMA: f64 = 0.5772156649015329;
 /// threshold is increased by the order to ensure accuracy.
 const ASYMPTOTIC_THRESHOLD: f64 = 25.0;
 
-/// Factorial function for small integers
-fn factorial(n: u32) -> u64 {
+/// Factorial function returning f64 (avoids integer overflow for n > 20)
+fn factorial(n: u32) -> f64 {
     match n {
-        0 | 1 => 1,
-        _ => (2..=n as u64).product(),
+        0 | 1 => 1.0,
+        _ => (2..=n as u64).fold(1.0_f64, |acc, k| acc * k as f64),
     }
 }
 
@@ -245,7 +245,7 @@ fn bessel_j_series(n: i32, z: Complex64) -> Complex64 {
     }
 
     // k=0 term: 1/n!
-    let mut term = Complex64::new(1.0 / factorial(n as u32) as f64, 0.0);
+    let mut term = Complex64::new(1.0 / factorial(n as u32), 0.0);
     let mut sum = term;
 
     // Sum terms until convergence using ratio recurrence
@@ -354,7 +354,7 @@ pub fn bessel_y(n: i32, z: Complex64) -> Complex64 {
     let mut sum1 = Complex64::new(0.0, 0.0);
 
     // ratio_term tracks (-z²/4)^k / (k! * (n+k)!) via incremental multiplication
-    let mut ratio_term = Complex64::new(1.0 / factorial(n as u32) as f64, 0.0);
+    let mut ratio_term = Complex64::new(1.0 / factorial(n as u32), 0.0);
 
     for k in 0i32..300 {
         let psi_sum = digamma(k as u32 + 1) + digamma((n + k) as u32 + 1);
@@ -381,7 +381,7 @@ pub fn bessel_y(n: i32, z: Complex64) -> Complex64 {
 
         let z_half_sq = z_half * z_half;
         let mut sum2 = Complex64::new(0.0, 0.0);
-        let mut term2 = Complex64::new(factorial((n - 1) as u32) as f64, 0.0); // k=0 term
+        let mut term2 = Complex64::new(factorial((n - 1) as u32), 0.0); // k=0 term
         for k in 0..n {
             if k > 0 {
                 // term2 *= z_half_sq * (n-k) / k  [from ratio of factorials]
