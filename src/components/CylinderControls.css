@@ -19,6 +19,32 @@
   margin-bottom: 1.5rem;
 }
 
+.advanced-section {
+  margin-bottom: 1.5rem;
+}
+
+.advanced-section > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.advanced-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-section > summary::before {
+  content: "▸ ";
+}
+
+.advanced-section[open] > summary::before {
+  content: "▾ ";
+}
+
+.advanced-section > .control-section {
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+}
+
 .section-label {
   display: block;
   font-weight: 600;
@@ -87,55 +113,74 @@
   font-weight: 600;
 }
 
-/* Complex input styles */
-.complex-input {
-  background: #252535;
-  border-radius: 6px;
-  padding: 1rem;
-}
-
-.complex-label {
-  display: block;
-  font-weight: 600;
-  color: #00d4ff;
-  margin-bottom: 0.75rem;
-}
-
-.complex-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.field-group {
+/* Inline complex number rows below the graph */
+.complex-inline-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+  font-family: monospace;
+  font-size: 0.9rem;
 }
 
-.field-label {
-  font-size: 0.75rem;
-  color: #888;
-  min-width: 40px;
+.complex-inline-label {
+  font-weight: 600;
+  min-width: 1.4em;
 }
 
-.field-group input[type="range"] {
-  flex: 1;
+.eps-row .complex-inline-label {
+  color: #00d4ff;
 }
 
-.field-group input[type="number"] {
-  width: 70px;
+.mu-row .complex-inline-label {
+  color: #ffaa00;
 }
 
-.complex-display {
-  margin-top: 0.5rem;
-  padding: 0.5rem;
-  background: #1a1a2a;
-  border-radius: 4px;
+.eps-row .complex-inline-eq {
+  color: #00d4ff;
+}
+
+.mu-row .complex-inline-eq {
+  color: #ffaa00;
+}
+
+.complex-inline-i {
+  margin-left: -0.3rem;
+}
+
+.eps-row .complex-inline-sign,
+.eps-row .complex-inline-op,
+.eps-row .complex-inline-i {
+  color: #00d4ff;
+}
+
+.mu-row .complex-inline-sign,
+.mu-row .complex-inline-op,
+.mu-row .complex-inline-i {
+  color: #ffaa00;
+}
+
+.complex-inline-row input[type="number"] {
+  width: 52px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   font-family: monospace;
   font-size: 1rem;
-  color: #00ff88;
-  text-align: center;
+}
+
+.complex-inline-row input[type="number"]:focus {
+  outline: none;
+}
+
+.eps-row input[type="number"] {
+  color: #00d4ff;
+}
+
+.mu-row input[type="number"] {
+  color: #ffaa00;
 }
 
 /* Number input styling */

@@ -1,0 +1,24 @@
+.complex-plane {
+  background: #252535;
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.complex-plane-svg {
+  width: 100%;
+  display: block;
+  cursor: crosshair;
+}
+
+.complex-plane-svg.dragging {
+  cursor: grabbing;
+}
+
+.complex-plane-point {
+  cursor: grab;
+}
+
+.complex-plane-svg.dragging .complex-plane-point {
+  cursor: grabbing;
+}
