@@ -52,9 +52,10 @@ export interface UseScatteringResult {
   paintRef: MutableRefObject<PaintCallback | null>;
   computeAll: (params: ScatteringParams) => void;
   recolor: (mode: VisualizationMode) => void;
+  setViewSize: (viewSize: number) => void;
 }
 
-function toComputeParams(p: ScatteringParams): ComputeParams {
+function toComputeParams(p: ScatteringParams, viewSize: number): ComputeParams {
   return {
     wavelength: p.wavelength,
     permittivityRe: p.material.permittivity.re,
@@ -63,6 +64,7 @@ function toComputeParams(p: ScatteringParams): ComputeParams {
     permeabilityIm: p.material.permeability.im,
     polarization: p.polarization === "TM" ? 0 : 1,
     maxOrder: p.maxOrder,
+    viewSize,
   };
 }
 
@@ -79,6 +81,7 @@ export function useScattering(): UseScatteringResult {
   const pendingParamsRef = useRef<ScatteringParams | null>(null);
   const pendingModeRef = useRef<VisualizationMode | null>(null);
   const modeRef = useRef<VisualizationMode>("magnitude");
+  const viewSizeRef = useRef(5.0);
   const lastSentParamsRef = useRef<ScatteringParams | null>(null);
 
   // Imperative paint callback — set by FieldVisualization
@@ -176,12 +179,23 @@ export function useScattering(): UseScatteringResult {
         lastSentParamsRef.current = params;
         postToWorker(workerRef.current, {
           type: "compute",
-          params: toComputeParams(params),
+          params: toComputeParams(params, viewSizeRef.current),
           mode: modeRef.current,
         });
       }
     },
     [postToWorker],
+  );
+
+  const setViewSize = useCallback(
+    (viewSize: number) => {
+      viewSizeRef.current = viewSize;
+      const lastParams = lastSentParamsRef.current;
+      if (lastParams) {
+        computeAll(lastParams);
+      }
+    },
+    [computeAll],
   );
 
   const recolor = useCallback(
@@ -211,7 +225,7 @@ export function useScattering(): UseScatteringResult {
         lastSentParamsRef.current = pendingParams;
         postToWorker(worker, {
           type: "compute",
-          params: toComputeParams(pendingParams),
+          params: toComputeParams(pendingParams, viewSizeRef.current),
           mode: modeRef.current,
         });
       } else {
@@ -305,5 +319,6 @@ export function useScattering(): UseScatteringResult {
     paintRef,
     computeAll,
     recolor,
+    setViewSize,
   };
 }

@@ -1,7 +1,6 @@
 import init, {
   compute_all,
   get_field_grid_size,
-  get_field_view_size,
   get_parameter_bounds,
 } from "scattering-core";
 
@@ -17,6 +16,7 @@ export interface ComputeParams {
   permeabilityIm: number;
   polarization: number; // 0 = TM, 1 = TE (integer avoids string encoding in WASM)
   maxOrder: number;
+  viewSize: number;
 }
 
 export interface ImageStats {
@@ -78,7 +78,6 @@ export type WorkerResponse =
 let fieldRealBuf: Float64Array | null = null;
 let fieldImagBuf: Float64Array | null = null;
 let cachedGridSize = 0;
-let cachedViewSize = 0;
 
 // Reused every frame — never transferred, never GC'd
 let reusableValues: Float64Array | null = null;
@@ -281,7 +280,6 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
       // Pre-allocate field buffers once — never GC'd
       cachedGridSize = get_field_grid_size();
-      cachedViewSize = get_field_view_size();
       const n = cachedGridSize * cachedGridSize;
       fieldRealBuf = new Float64Array(n);
       fieldImagBuf = new Float64Array(n);
@@ -315,6 +313,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         p.permeabilityIm,
         p.polarization,
         p.maxOrder,
+        p.viewSize,
         fieldRealBuf!,
         fieldImagBuf!,
       );
@@ -337,7 +336,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         },
         imageData,
         gridSize: cachedGridSize,
-        viewSize: cachedViewSize,
+        viewSize: p.viewSize,
         stats,
       };
 

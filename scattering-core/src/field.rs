@@ -16,14 +16,11 @@ use std::f64::consts::PI;
 /// Grid resolution for field computation
 pub const GRID_SIZE: usize = 256;
 
-/// View size in units of cylinder diameter (5D x 5D)
-pub const VIEW_SIZE: f64 = 5.0;
+/// Default view size in units of cylinder diameter (5D x 5D)
+pub const DEFAULT_VIEW_SIZE: f64 = 5.0;
 
 /// Number of points in radial spline grids
 const SPLINE_POINTS: usize = 128;
-
-/// Maximum radius on the grid (corner of the view)
-const R_MAX: f64 = 3.536; // ~sqrt(2) * VIEW_SIZE / 2
 
 // ============================================================================
 // Cubic Spline Interpolation for Bessel Functions
@@ -173,6 +170,8 @@ pub struct FieldParams {
     pub internal_coeffs_imag: Vec<f64>,
     /// Orders corresponding to coefficients (-N to +N)
     pub orders: Vec<i32>,
+    /// View size in cylinder diameters (physical extent of the grid)
+    pub view_size: f64,
 }
 
 /// Result of field computation.
@@ -224,20 +223,24 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
     let k1 = k0 * m;
 
     // Grid setup
-    let half_size = VIEW_SIZE / 2.0;
+    let view_size = params.view_size;
+    let half_size = view_size / 2.0;
     let x_min = -half_size;
     let x_max = half_size;
     let y_min = -half_size;
     let y_max = half_size;
-    let dx = VIEW_SIZE / (GRID_SIZE as f64);
+    let dx = view_size / (GRID_SIZE as f64);
 
     // ===== PHASE 1: Build splines for Bessel functions =====
 
-    // Exterior: Hankel H_n(k0*r) for r in [RADIUS, R_MAX]
+    // Maximum radius on the grid (corner of the view)
+    let r_max = (2.0_f64).sqrt() * half_size;
+
+    // Exterior: Hankel H_n(k0*r) for r in [RADIUS, r_max]
     let hankel_splines: Vec<BesselSpline> = params
         .orders
         .iter()
-        .map(|&n| BesselSpline::new_hankel(n, k0, RADIUS, R_MAX, SPLINE_POINTS))
+        .map(|&n| BesselSpline::new_hankel(n, k0, RADIUS, r_max, SPLINE_POINTS))
         .collect();
 
     // Interior: Bessel J_n(k1*r) for r in [0, RADIUS]
@@ -301,7 +304,7 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
         field_real,
         field_imag,
         grid_size: GRID_SIZE,
-        view_size: VIEW_SIZE,
+        view_size,
         x_min,
         x_max,
         y_min,
@@ -699,6 +702,7 @@ mod tests {
                 .map(|c| c.im)
                 .collect(),
             orders: scattering.orders,
+            view_size: 5.0_f64,
         };
 
         let result = compute_field(&field_params);

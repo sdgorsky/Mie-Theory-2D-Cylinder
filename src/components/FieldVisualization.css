@@ -15,33 +15,72 @@
   font-size: 0.9rem;
 }
 
-.mode-buttons {
+.mode-pill {
+  position: relative;
   display: flex;
-  gap: 0.25rem;
-}
-
-.mode-buttons button {
-  padding: 0.4rem 0.8rem;
+  background: #1e1e2e;
   border: 1px solid #444;
-  background: #2a2a3a;
-  color: #b0b0b0;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-family: monospace;
-  transition: all 0.2s;
+  border-radius: 999px;
+  padding: 3px;
 }
 
-.mode-buttons button:hover {
-  background: #3a3a4a;
-  border-color: #555;
-}
-
-.mode-buttons button.active {
+.pill-highlight {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  height: calc(100% - 6px);
   background: #00d4ff;
+  border-radius: 999px;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.pill-highlight-3 {
+  width: calc(100% / 3 - 2px);
+}
+
+.pill-highlight-4 {
+  width: calc(100% / 4 - 2px);
+}
+
+.mode-pill button {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.3rem 0.8rem;
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 0.8rem;
+  font-family: monospace;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 999px;
+  transition: color 0.25s;
+}
+
+.mode-pill button.active {
   color: #1a1a2a;
-  border-color: #00d4ff;
   font-weight: 600;
+}
+
+.mode-pill button:hover:not(.active) {
+  color: #ccc;
+}
+
+.zoom-control {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.zoom-control label {
+  color: #888;
+  font-size: 0.9rem;
 }
 
 .canvas-container {

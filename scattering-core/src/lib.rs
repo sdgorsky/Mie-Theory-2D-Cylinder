@@ -3,7 +3,7 @@ pub mod field;
 pub mod scattering;
 mod utils;
 
-use field::{compute_field, FieldParams, GRID_SIZE, VIEW_SIZE};
+use field::{compute_field, FieldParams, DEFAULT_VIEW_SIZE, GRID_SIZE};
 use scattering::{
     calculate_scattering, Material, Polarization, ScatteringParams, MAX_ORDER_MAX, MAX_ORDER_MIN,
     PERMEABILITY_IM_MAX, PERMEABILITY_IM_MIN, PERMEABILITY_RE_MAX, PERMEABILITY_RE_MIN,
@@ -97,6 +97,7 @@ pub fn compute_electric_field(
     internal_coeffs_real: Vec<f64>,
     internal_coeffs_imag: Vec<f64>,
     orders: Vec<i32>,
+    view_size: f64,
 ) -> Result<JsValue, JsValue> {
     let params = FieldParams {
         wavelength,
@@ -111,6 +112,7 @@ pub fn compute_electric_field(
         internal_coeffs_real,
         internal_coeffs_imag,
         orders,
+        view_size,
     };
 
     let result = compute_field(&params);
@@ -141,10 +143,10 @@ pub fn get_field_grid_size() -> usize {
     GRID_SIZE
 }
 
-/// Get the view size (in cylinder diameters) used for field computation.
+/// Get the default view size (in cylinder diameters) for field computation.
 #[wasm_bindgen]
 pub fn get_field_view_size() -> f64 {
-    VIEW_SIZE
+    DEFAULT_VIEW_SIZE
 }
 
 /// Get parameter bounds (single source of truth for UI sliders).
@@ -228,6 +230,7 @@ pub fn compute_all(
     permeability_imag: f64,
     polarization: u32,
     max_order: i32,
+    view_size: f64,
     out_field_real: &js_sys::Float64Array,
     out_field_imag: &js_sys::Float64Array,
 ) {
@@ -281,6 +284,7 @@ pub fn compute_all(
         internal_coeffs_real: int_re,
         internal_coeffs_imag: int_im,
         orders: scattering.orders,
+        view_size,
     };
 
     let field = compute_field(&field_params);

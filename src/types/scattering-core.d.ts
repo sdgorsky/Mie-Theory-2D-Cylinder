@@ -27,6 +27,7 @@ declare module "scattering-core" {
     internal_coeffs_re: Float64Array,
     internal_coeffs_im: Float64Array,
     orders: Int32Array,
+    view_size: number,
   ): {
     field_real: number[];
     field_imag: number[];

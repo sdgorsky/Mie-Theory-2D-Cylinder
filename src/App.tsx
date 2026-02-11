@@ -23,6 +23,7 @@ function App() {
     paintRef,
     computeAll,
     recolor,
+    setViewSize,
   } = useScattering();
 
   const [showOverlay, setShowOverlay] = useState(true);
@@ -67,6 +68,7 @@ function App() {
             polarization={displayParams.polarization}
             showOverlay={showOverlay}
             onModeChange={recolor}
+            onZoomChange={setViewSize}
             width={512}
             height={512}
           />

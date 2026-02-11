@@ -7,6 +7,7 @@ declare module "scattering-core" {
     permeability_imag: number,
     polarization: number,
     max_order: number,
+    view_size: number,
     out_field_real: Float64Array,
     out_field_imag: Float64Array,
   ): void;

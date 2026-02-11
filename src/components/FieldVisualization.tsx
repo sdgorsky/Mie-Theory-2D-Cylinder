@@ -10,6 +10,12 @@ import "./FieldVisualization.css";
 
 export type { VisualizationMode };
 
+const ZOOM_OPTIONS = [
+  { label: "0.5x", viewSize: 10 },
+  { label: "1.0x", viewSize: 5 },
+  { label: "2.0x", viewSize: 2.5 },
+];
+
 interface FieldVisualizationProps {
   paintRef: MutableRefObject<PaintCallback | null>;
   imageStats: ImageStats | null;
@@ -17,6 +23,7 @@ interface FieldVisualizationProps {
   polarization: Polarization;
   showOverlay: boolean;
   onModeChange: (mode: VisualizationMode) => void;
+  onZoomChange: (viewSize: number) => void;
   width?: number;
   height?: number;
 }
@@ -28,6 +35,7 @@ export const FieldVisualization = memo(function FieldVisualization({
   polarization,
   showOverlay,
   onModeChange,
+  onZoomChange,
   width = 512,
   height = 512,
 }: FieldVisualizationProps) {
@@ -38,6 +46,7 @@ export const FieldVisualization = memo(function FieldVisualization({
   const showOverlayRef = useRef(showOverlay);
   const lastViewSizeRef = useRef(0);
   const [mode, setMode] = useState<VisualizationMode>("magnitude");
+  const [zoomIndex, setZoomIndex] = useState(1);
 
   const handleModeClick = (m: VisualizationMode) => {
     setMode(m);
@@ -134,7 +143,13 @@ export const FieldVisualization = memo(function FieldVisualization({
     <div className="field-visualization">
       <div className="visualization-controls">
         <label>Display:</label>
-        <div className="mode-buttons">
+        <div className="mode-pill">
+          <div
+            className="pill-highlight pill-highlight-4"
+            style={{
+              transform: `translateX(${(Object.keys(modeLabels) as VisualizationMode[]).indexOf(mode) * 100}%)`,
+            }}
+          />
           {(Object.keys(modeLabels) as VisualizationMode[]).map((m) => (
             <button
               key={m}
@@ -142,6 +157,28 @@ export const FieldVisualization = memo(function FieldVisualization({
               onClick={() => handleModeClick(m)}
             >
               {modeLabels[m]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="zoom-control">
+        <label>Zoom:</label>
+        <div className="mode-pill">
+          <div
+            className="pill-highlight pill-highlight-3"
+            style={{ transform: `translateX(${zoomIndex * 100}%)` }}
+          />
+          {ZOOM_OPTIONS.map((opt, i) => (
+            <button
+              key={i}
+              className={i === zoomIndex ? "active" : ""}
+              onClick={() => {
+                setZoomIndex(i);
+                onZoomChange(opt.viewSize);
+              }}
+            >
+              {opt.label}
             </button>
           ))}
         </div>
