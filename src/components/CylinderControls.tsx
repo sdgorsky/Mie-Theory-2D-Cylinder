@@ -139,40 +139,50 @@ export const CylinderControls = memo(function CylinderControls({
           <span className="complex-inline-sign">
             {local.material.permittivity.re < 0 ? "−" : "\u2007"}
           </span>
-          <input
-            type="number"
-            min={bounds.permittivity_re_min}
-            max={bounds.permittivity_re_max}
-            step={0.1}
-            value={Math.abs(local.material.permittivity.re).toFixed(1)}
-            onChange={(e) => {
-              const abs = parseFloat(e.target.value) || 0;
-              const sign = local.material.permittivity.re < 0 ? -1 : 1;
-              updatePermittivity({
-                ...local.material.permittivity,
-                re: sign * abs,
-              });
-            }}
-          />
+          <div className="stepper-wrap">
+            <span className="stepper-display">
+              {Math.abs(local.material.permittivity.re).toFixed(1)}
+            </span>
+            <input
+              type="number"
+              min={bounds.permittivity_re_min}
+              max={bounds.permittivity_re_max}
+              step={0.1}
+              value={local.material.permittivity.re.toFixed(1)}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val))
+                  updatePermittivity({
+                    ...local.material.permittivity,
+                    re: val,
+                  });
+              }}
+            />
+          </div>
           <span className="complex-inline-op">
             {local.material.permittivity.im < 0 ? "−" : "+"}
           </span>
           <span className="complex-inline-i">i</span>
-          <input
-            type="number"
-            min={bounds.permittivity_im_min}
-            max={bounds.permittivity_im_max}
-            step={0.1}
-            value={Math.abs(local.material.permittivity.im).toFixed(1)}
-            onChange={(e) => {
-              const abs = parseFloat(e.target.value) || 0;
-              const sign = local.material.permittivity.im < 0 ? -1 : 1;
-              updatePermittivity({
-                ...local.material.permittivity,
-                im: sign * abs,
-              });
-            }}
-          />
+          <div className="stepper-wrap">
+            <span className="stepper-display">
+              {Math.abs(local.material.permittivity.im).toFixed(1)}
+            </span>
+            <input
+              type="number"
+              min={bounds.permittivity_im_min}
+              max={bounds.permittivity_im_max}
+              step={0.1}
+              value={local.material.permittivity.im.toFixed(1)}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val))
+                  updatePermittivity({
+                    ...local.material.permittivity,
+                    im: val,
+                  });
+              }}
+            />
+          </div>
         </div>
 
         <div className="complex-inline-row mu-row">
@@ -181,40 +191,50 @@ export const CylinderControls = memo(function CylinderControls({
           <span className="complex-inline-sign">
             {local.material.permeability.re < 0 ? "−" : "\u2007"}
           </span>
-          <input
-            type="number"
-            min={bounds.permeability_re_min}
-            max={bounds.permeability_re_max}
-            step={0.1}
-            value={Math.abs(local.material.permeability.re).toFixed(1)}
-            onChange={(e) => {
-              const abs = parseFloat(e.target.value) || 0;
-              const sign = local.material.permeability.re < 0 ? -1 : 1;
-              updatePermeability({
-                ...local.material.permeability,
-                re: sign * abs,
-              });
-            }}
-          />
+          <div className="stepper-wrap">
+            <span className="stepper-display">
+              {Math.abs(local.material.permeability.re).toFixed(1)}
+            </span>
+            <input
+              type="number"
+              min={bounds.permeability_re_min}
+              max={bounds.permeability_re_max}
+              step={0.1}
+              value={local.material.permeability.re.toFixed(1)}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val))
+                  updatePermeability({
+                    ...local.material.permeability,
+                    re: val,
+                  });
+              }}
+            />
+          </div>
           <span className="complex-inline-op">
             {local.material.permeability.im < 0 ? "−" : "+"}
           </span>
           <span className="complex-inline-i">i</span>
-          <input
-            type="number"
-            min={bounds.permeability_im_min}
-            max={bounds.permeability_im_max}
-            step={0.1}
-            value={Math.abs(local.material.permeability.im).toFixed(1)}
-            onChange={(e) => {
-              const abs = parseFloat(e.target.value) || 0;
-              const sign = local.material.permeability.im < 0 ? -1 : 1;
-              updatePermeability({
-                ...local.material.permeability,
-                im: sign * abs,
-              });
-            }}
-          />
+          <div className="stepper-wrap">
+            <span className="stepper-display">
+              {Math.abs(local.material.permeability.im).toFixed(1)}
+            </span>
+            <input
+              type="number"
+              min={bounds.permeability_im_min}
+              max={bounds.permeability_im_max}
+              step={0.1}
+              value={local.material.permeability.im.toFixed(1)}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val))
+                  updatePermeability({
+                    ...local.material.permeability,
+                    im: val,
+                  });
+              }}
+            />
+          </div>
         </div>
       </div>
 
