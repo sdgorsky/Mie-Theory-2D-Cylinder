@@ -1,7 +1,7 @@
 //! Validation tests for Bessel function implementations against SciPy reference data.
 
 use num_complex::Complex64;
-use scattering_core::bessel::{bessel_j, hankel1};
+use scattering_core::bessel::{bessel_i, bessel_j, bessel_k, hankel1};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
@@ -416,7 +416,6 @@ fn validate_bessel_j_against_scipy() {
 }
 
 #[test]
-#[ignore]
 fn validate_hankel1_against_scipy() {
     let data_path = artifacts_path("hankel1_evaluations.txt");
     let sample_size = get_sample_size();
@@ -480,4 +479,42 @@ fn validate_bessel_detailed_report() {
     }
 
     println!("Detailed report written to: {}", report_path);
+}
+
+#[test]
+fn validate_bessel_k_against_scipy() {
+    let data_path = artifacts_path("bessel_k_evaluations.txt");
+    let sample_size = get_sample_size();
+
+    if sample_size.is_some() {
+        println!("Running with sample size: {:?}", sample_size);
+    }
+
+    let report = run_validation(&data_path, "Bessel K", bessel_k, sample_size);
+    print_report(&report);
+
+    assert!(
+        report.max_relative_error < 1e-6,
+        "Max relative error {:.2e} exceeds threshold 1e-6",
+        report.max_relative_error
+    );
+}
+
+#[test]
+fn validate_bessel_i_against_scipy() {
+    let data_path = artifacts_path("bessel_i_evaluations.txt");
+    let sample_size = get_sample_size();
+
+    if sample_size.is_some() {
+        println!("Running with sample size: {:?}", sample_size);
+    }
+
+    let report = run_validation(&data_path, "Bessel I", bessel_i, sample_size);
+    print_report(&report);
+
+    assert!(
+        report.max_relative_error < 1e-6,
+        "Max relative error {:.2e} exceeds threshold 1e-6",
+        report.max_relative_error
+    );
 }

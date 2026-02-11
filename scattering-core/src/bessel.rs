@@ -1,6 +1,49 @@
 //! Complex Bessel functions for electromagnetic scattering calculations.
 //!
-//! Pure Rust implementation using series expansions and asymptotic formulas.
+//! Pure Rust implementation following the architecture of the AMOS Fortran library
+//! (D.E. Amos, Sandia National Laboratories), which underlies SciPy's Bessel routines.
+//!
+//! # Architecture
+//!
+//! The central design decision is that H^(1)_n(z) for complex z is computed via the
+//! modified Bessel function K_n, rather than J_n + iY_n (which suffers from catastrophic
+//! cancellation in the upper half-plane). The identity used is:
+//!
+//!   H^(1)_n(z) = (2/pi*i) * exp(-i*n*pi/2) * K_n(-iz)
+//!
+//! with two sub-paths for K_n depending on where w = -iz falls:
+//!
+//! - **Re(w) > 0 (ZBKNU path):** K_n computed directly via Miller backward recurrence
+//!   for |z| > 2, or power series for |z| <= 2.
+//! - **Re(w) <= 0 (ZACON path):** Analytic continuation into the left half-plane using
+//!   K_n(w) = (-1)^n * K_n(-w) + pi*i * I_n(-w), where I_n is obtained through the
+//!   connection formula I_n(z) = i^{-n} * J_n(iz).
+//!
+//! For real arguments (Im(z) = 0), H^(1)_n uses the simpler J_n + iY_n path, which is
+//! exact for real inputs and avoids unnecessary trips through K.
+//!
+//! # References
+//!
+//! - D.E. Amos, "A Portable Package for Bessel Functions of a Complex Argument and
+//!   Nonnegative Order", ACM Trans. Math. Software, Vol. 12, No. 3, 1986, pp. 265-273.
+//!   <https://dl.acm.org/doi/10.1145/7921.214331>
+//!
+//! - D.E. Amos, "Algorithm 644: A Portable Package for Bessel Functions of a Complex
+//!   Argument and Nonnegative Order", ACM Trans. Math. Software, Vol. 12, No. 3, 1986,
+//!   pp. 265-273. (Accompanying source code for ZBESH, ZBKNU, ZACON, et al.)
+//!
+//! - DLMF (NIST Digital Library of Mathematical Functions), Chapter 10: Bessel Functions.
+//!   <https://dlmf.nist.gov/10>
+//!   Key identities:
+//!     - 10.27.6 (I-J connection)
+//!     - 10.34.2 (K analytic continuation)
+//!     - 10.4.4 (J reflection)
+//!     - 10.2.2 (J power series),
+//!     - 10.17.5 (Hankel asymptotic)
+//!
+//! - Gonum (Go Numerical Library) translation of AMOS, used as a readable reference for
+//!   the ZBKNU Miller backward recurrence algorithm.
+//!   <https://github.com/gonum/gonum>
 
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -262,6 +305,244 @@ fn bessel_j_series(n: i32, z: Complex64) -> Complex64 {
     prefix * sum
 }
 
+/// Power series for modified Bessel function I_n(z).
+///
+/// I_n(z) = (z/2)^n * Σ_k (z²/4)^k / (k! * (n+k)!)
+///
+/// Same structure as J_n series but with +z²/4 instead of -z²/4.
+/// No alternating signs means no cancellation — converges for all z.
+fn bessel_i_series(n: i32, z: Complex64) -> Complex64 {
+    let z_half = z / 2.0;
+    let z_half_sq = z_half * z_half;
+
+    // (z/2)^n
+    let mut prefix = Complex64::new(1.0, 0.0);
+    for _ in 0..n {
+        prefix *= z_half;
+    }
+
+    // k=0 term: 1/n!
+    let mut term = Complex64::new(1.0 / factorial(n as u32), 0.0);
+    let mut sum = term;
+
+    for k in 1i32..500 {
+        let denom = k as f64 * (n + k) as f64;
+        term = term * z_half_sq / Complex64::new(denom, 0.0);
+        sum += term;
+
+        if term.norm() < 1e-15 * sum.norm() {
+            break;
+        }
+    }
+
+    prefix * sum
+}
+
+/// I_n(z) via forward recurrence from I_0, I_1.
+///
+/// I_{k+1}(z) = I_{k-1}(z) - (2k/z)*I_k(z)
+///
+/// Forward recurrence is stable for I_n (the dominant solution for Re(z)>0).
+/// K_0(z) and K_1(z) via Miller's backward recurrence (AMOS ZBKNU algorithm).
+///
+/// This is the algorithm AMOS uses for |z| > 2. It computes:
+///   K_0(z) = coef * P_0 / CS
+///   K_1(z) = K_0(z) * ((0.5 - P_1/P_0) / z + 1)
+/// where coef = sqrt(π/(2z)) * exp(-z), and P_k/CS come from backward recurrence.
+///
+/// Converges to machine precision for all arg(z) in the RHP — no Stokes errors.
+fn bessel_k01_miller(z: Complex64) -> (Complex64, Complex64) {
+    let caz = z.norm();
+    let tol = f64::EPSILON; // ~2.22e-16
+
+    // Prefactor: sqrt(pi/(2z)) * exp(-z)
+    let coef = (Complex64::new(PI / 2.0, 0.0) / z).sqrt() * (-z).exp();
+
+    // --- Determine starting index FK ---
+    let fhs_init = 0.25_f64; // |0.25 - dnu²| for dnu=0
+    let mut fk: f64;
+
+    // Precision parameters (for f64: 53-bit mantissa)
+    let t1_prec = 52.8_f64; // 52 * log10(2) * 3.322 ≈ 52.8
+    let t2 = (2.0 / 3.0) * t1_prec - 6.0; // ≈ 29.2
+
+    if caz >= t2 {
+        // ETEST forward loop (AMOS labels 140-160)
+        let etest = 1.0 / (PI * caz * tol);
+        fk = 1.0;
+        if etest >= 1.0 {
+            let mut fks = 2.0_f64;
+            let mut ckr = 2.0 * caz + 2.0;
+            let mut p1r = 0.0_f64;
+            let mut p2r = 1.0_f64;
+            let mut fhs = fhs_init;
+
+            for _ in 1..=30 {
+                let ak = fhs / fks;
+                let cbr = ckr / (fk + 1.0);
+                let ptr = p2r;
+                p2r = cbr * p2r - p1r * ak;
+                p1r = ptr;
+                ckr += 2.0;
+                fks += 2.0 * fk + 2.0;
+                fhs += 2.0 * fk;
+                fk += 1.0;
+                if etest < p2r.abs() * fk {
+                    break;
+                }
+            }
+
+            // Safety margin based on angle of z
+            let t1_angle = if z.re != 0.0 {
+                (z.im / z.re).abs().atan()
+            } else {
+                PI / 2.0
+            };
+            // SPI = sqrt(6/pi) ≈ 1.9099
+            fk += 1.90986 * t1_angle * (t2 / caz).sqrt();
+        }
+    } else {
+        // Heuristic FK formula (AMOS label 170)
+        let a2 = caz.sqrt();
+        // FPI ≈ pi * 2/sqrt(3) ≈ 1.8977
+        let mut ak = 1.89770 / (tol * a2.sqrt());
+        let aa = 3.0 * t1_prec / (1.0 + caz);
+        let bb = 14.7 * t1_prec / (28.0 + caz);
+        ak = (ak.ln() + caz * aa.cos() / (1.0 + 0.008 * caz)) / bb.cos();
+        fk = 0.12125 * ak * ak / caz + 1.5;
+    }
+
+    // --- Backward recurrence ---
+    let k = fk as usize;
+    let mut fk = k as f64;
+    let mut fks = fk * fk;
+    let fhs = 0.25_f64; // reset for backward recurrence (dnu=0)
+
+    let mut p1 = Complex64::new(0.0, 0.0); // P_{k+1}
+    let mut p2 = Complex64::new(tol, 0.0); // P_k
+    let mut cs = p2; // normalization sum
+
+    for _ in 0..k {
+        let a1 = fks - fk; // fk*(fk-1)
+        let ak = (fks + fk) / (a1 + fhs); // (fk²+fk)/(fk²-fk+0.25)
+        let rak = 2.0 / (fk + 1.0);
+        let cb = (Complex64::new(fk, 0.0) + z) * rak; // (fk + z) * 2/(fk+1)
+
+        let p2_new = (cb * p2 - p1) * ak;
+        p1 = p2;
+        p2 = p2_new;
+        cs += p2;
+
+        fks = a1 - fk + 1.0; // (fk-1)²
+        fk -= 1.0;
+    }
+
+    // Normalize: K_0 = coef * P_0 / CS
+    let k0 = coef * p2 / cs;
+
+    // K_1 from backward recurrence ratio: K_1 = K_0 * ((0.5 - P_1/P_0)/z + 1)
+    let ratio = p1 / p2;
+    let k1 = k0 * ((Complex64::new(0.5, 0.0) - ratio) / z + Complex64::new(1.0, 0.0));
+
+    (k0, k1)
+}
+
+/// K_0(z) via power series (DLMF 10.31.2 for n=0).
+///
+/// K_0(z) = -(ln(z/2) + γ) * I_0(z) + Σ_{k=1}^∞ H_k * (z/2)^{2k} / (k!)²
+///
+/// where H_k = 1 + 1/2 + ... + 1/k (harmonic numbers).
+fn bessel_k0_series(z: Complex64) -> Complex64 {
+    let i0 = bessel_i_series(0, z);
+    let ln_z_half = (z / 2.0).ln();
+
+    let z_half_sq = (z / 2.0) * (z / 2.0);
+
+    // Sum: Σ_{k=1}^∞ H_k * (z²/4)^k / (k!)²
+    // base_k = (z²/4)^k / (k!)², ratio: base_k = base_{k-1} * z_half_sq / k²
+    let mut base = Complex64::new(1.0, 0.0);
+    let mut harmonic = 0.0_f64;
+    let mut sum = Complex64::new(0.0, 0.0);
+
+    for k in 1..500 {
+        let kf = k as f64;
+        base = base * z_half_sq / Complex64::new(kf * kf, 0.0);
+        harmonic += 1.0 / kf;
+        let term = base * harmonic;
+        sum += term;
+
+        if k > 5 && term.norm() < 1e-15 * sum.norm() {
+            break;
+        }
+    }
+
+    -(ln_z_half + Complex64::new(EULER_GAMMA, 0.0)) * i0 + sum
+}
+
+/// I_n(z) for complex z via connection to J_n.
+///
+/// Uses the identity I_n(z) = i^{-n} * J_n(iz) (DLMF 10.27.6).
+/// This leverages the well-tested J_n code (series, Miller, asymptotic) and
+/// avoids I_n-specific issues: series cancellation for complex z near the
+/// imaginary axis, asymptotic Stokes errors, and forward recurrence instability.
+pub fn bessel_i(n: i32, z: Complex64) -> Complex64 {
+    let iz = Complex64::i() * z;
+    // i^{-n} = (-i)^n: cycle of length 4
+    let phase = match n.rem_euclid(4) {
+        0 => Complex64::new(1.0, 0.0),  // i^0 = 1
+        1 => Complex64::new(0.0, -1.0), // i^{-1} = -i
+        2 => Complex64::new(-1.0, 0.0), // i^{-2} = -1
+        3 => Complex64::new(0.0, 1.0),  // i^{-3} = i
+        _ => unreachable!(),
+    };
+    phase * bessel_j(n, iz)
+}
+
+/// K_n(z) for Re(z) > 0.
+///
+/// Always computes K_0/K_1 first, then forward-recurs to K_n.
+/// For |z| > 2: Miller backward recurrence (AMOS ZBKNU) — machine precision.
+/// For |z| <= 2: K_0 from series, K_1 from Wronskian I_0*K_1 + I_1*K_0 = 1/z.
+/// Forward recurrence K_{k+1} = K_{k-1} + (2k/z)*K_k is stable (K is dominant).
+pub fn bessel_k(n: i32, z: Complex64) -> Complex64 {
+    let n_abs = n.unsigned_abs() as i32; // K_{-n} = K_n
+    let znorm = z.norm();
+
+    // Compute K_0 and K_1, then forward-recur
+    let (k0, k1) = if znorm > 2.0 {
+        // Miller backward recurrence (AMOS ZBKNU): machine precision for all arg(z)
+        bessel_k01_miller(z)
+    } else {
+        // K_0 from series, K_1 from Wronskian: I_0*K_1 + I_1*K_0 = 1/z
+        let k0 = bessel_k0_series(z);
+        let i0 = bessel_i_series(0, z);
+        let i1 = bessel_i_series(1, z);
+        let k1 = (Complex64::new(1.0, 0.0) / z - i1 * k0) / i0;
+        (k0, k1)
+    };
+
+    if n_abs == 0 {
+        return k0;
+    }
+    if n_abs == 1 {
+        return k1;
+    }
+
+    // Forward recurrence: K_{k+1} = K_{k-1} + (2k/z)*K_k
+    // K is dominant, so forward recurrence is stable.
+    let two_over_z = Complex64::new(2.0, 0.0) / z;
+    let mut k_prev = k0;
+    let mut k_curr = k1;
+
+    for k in 1..n_abs {
+        let k_next = k_prev + two_over_z * k as f64 * k_curr;
+        k_prev = k_curr;
+        k_curr = k_next;
+    }
+
+    k_curr
+}
+
 /// Bessel function of the first kind J_n(z) for complex argument.
 ///
 /// Uses three algorithms depending on the regime:
@@ -273,6 +554,13 @@ pub fn bessel_j(n: i32, z: Complex64) -> Complex64 {
     if n < 0 {
         let sign = if (-n) % 2 == 0 { 1.0 } else { -1.0 };
         return sign * bessel_j(-n, z);
+    }
+
+    // Reflect to positive real half-plane: J_n(-z) = (-1)^n * J_n(z) (integer n)
+    // Avoids asymptotic expansion issues near the negative real axis (sqrt branch cut).
+    if z.re < 0.0 {
+        let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+        return sign * bessel_j(n, -z);
     }
 
     // For very small z, use leading term
@@ -289,8 +577,9 @@ pub fn bessel_j(n: i32, z: Complex64) -> Complex64 {
 
     // Asymptotic with dominant Hankel for complex z with large |Im(z)|.
     // One Hankel dominates by exp(2|Im(z)|), avoiding cancellation.
-    // Requires |z| > 2n+5 so the asymptotic series has enough converging terms.
-    if z.im.abs() >= 5.0 && znorm >= 2.0 * nf + 5.0 {
+    // Requires both |z| > 2n+5 (enough asymptotic terms) and |z| > 10
+    // (expansion needs |z| absolutely large enough for the series to converge).
+    if z.im.abs() >= 5.0 && znorm >= (2.0 * nf + 5.0).max(10.0) {
         return bessel_j_asymptotic(n, z);
     }
 
@@ -325,7 +614,6 @@ pub fn bessel_y(n: i32, z: Complex64) -> Complex64 {
         return sign * bessel_y(-n, z);
     }
 
-    // Use asymptotic expansion for large |z|
     if z.norm() > ASYMPTOTIC_THRESHOLD {
         return bessel_y_asymptotic(n, z);
     }
@@ -395,26 +683,48 @@ pub fn bessel_y(n: i32, z: Complex64) -> Complex64 {
     part1 + part2 - part3
 }
 
+/// H^(1)_n(z) via modified Bessel K_n (full AMOS architecture).
+///
+/// Uses the identity: H^(1)_n(z) = (2/(πi)) * exp(-inπ/2) * K_n(-iz)
+///
+/// Two sub-paths based on w = -iz:
+/// - Re(w) >= 0 (i.e. Im(z) >= 0): K_n(w) directly (ZBKNU path)
+/// - Re(w) < 0  (i.e. Im(z) < 0):  analytic continuation (ZACON path)
+///   K_n(w) = (-1)^n * K_n(u) + πi * I_n(u)  where u = -w, Re(u) > 0
+fn hankel1_via_k(n: i32, z: Complex64) -> Complex64 {
+    let nf = n as f64;
+    let w = -Complex64::i() * z; // w = -iz, Re(w) = Im(z)
+
+    let k_n_w = if w.re >= 0.0 {
+        // RHP (ZBKNU path): K_n directly
+        bessel_k(n, w)
+    } else {
+        // LHP (ZACON path): analytic continuation of K_n for the H^(1) identity.
+        // H^(1)(z) = (2/(πi)) * e^{-inπ/2} * K_n(-iz), where K is analytically
+        // continued clockwise (m=-1) from the RHP into the LHP:
+        //   K_n(w) = (-1)^n K_n(u) + πi I_n(u),  u = -w (in RHP)
+        let u = -w;
+        let k_n_u = bessel_k(n, u);
+        let i_n_u = bessel_i(n, u);
+        let sign_n = if n % 2 == 0 { 1.0 } else { -1.0 };
+        Complex64::new(sign_n, 0.0) * k_n_u + Complex64::new(0.0, PI) * i_n_u
+    };
+
+    let exp_factor = Complex64::new(0.0, -nf * PI / 2.0).exp();
+    let prefactor = Complex64::new(2.0 / PI, 0.0) / Complex64::i();
+    prefactor * exp_factor * k_n_w
+}
+
 /// Hankel function of the first kind H^(1)_n(z) = J_n(z) + i*Y_n(z)
+///
+/// For real z (Im=0): J+iY is simpler and exact (no cancellation for real args).
+/// For complex z: routes through K_n via the full AMOS architecture (ZBKNU/ZACON).
 pub fn hankel1(n: i32, z: Complex64) -> Complex64 {
-    // H1 asymptotic computes H1 directly (single series, no cancellation).
-    //
-    // The J+iY fallback suffers catastrophic cancellation for complex z when
-    // |Im(z)| is large (J and Y each ~ exp(|Im(z)|) while H1 ~ exp(-|Im(z)|)).
-    // Cancellation loses ~2|Im(z)|/ln(10) digits. With 15 digits of f64 precision,
-    // this is catastrophic when |Im(z)| > ~17.
-    //
-    // Use asymptotic when either:
-    // (a) |z| is large enough for good asymptotic accuracy, OR
-    // (b) |Im(z)| is large enough that J+iY cancellation would be worse
-    let znorm = z.norm();
-    let abs_n = n.unsigned_abs() as f64;
-    let asymptotic_threshold = (abs_n * abs_n / 2.0 + abs_n).max(ASYMPTOTIC_THRESHOLD);
-    let jiy_cancellation_bad = z.im.abs() >= 5.0 && znorm >= abs_n + 3.0;
-    if znorm > asymptotic_threshold || jiy_cancellation_bad {
-        return hankel1_asymptotic(n, z);
+    if z.im == 0.0 {
+        return bessel_j(n, z) + Complex64::i() * bessel_y(n, z);
     }
-    bessel_j(n, z) + Complex64::i() * bessel_y(n, z)
+
+    hankel1_via_k(n, z)
 }
 
 /// Derivative of Bessel function J'_n(z) using recurrence relation:
@@ -435,200 +745,6 @@ mod tests {
 
     fn approx_eq(a: Complex64, b: Complex64, tol: f64) -> bool {
         (a - b).norm() < tol
-    }
-
-    #[test]
-    fn diagnose_asymptotic_bug() {
-        // Compare asymptotic at z with positive vs negative real part
-        let cases: Vec<(&str, i32, Complex64, Complex64)> = vec![
-            // z = +30 + 5i (first quadrant - far from branch cut)
-            (
-                "Q1 +30+5i",
-                0,
-                Complex64::new(30.0, 5.0),
-                bessel_j_miller(0, Complex64::new(30.0, 5.0)),
-            ),
-            // z = -30 + 5i (second quadrant - near negative real axis)
-            (
-                "Q2 -30+5i",
-                0,
-                Complex64::new(-30.0, 5.0),
-                bessel_j_miller(0, Complex64::new(-30.0, 5.0)),
-            ),
-            // z = 30 (pure real positive)
-            (
-                "Real +30",
-                0,
-                Complex64::new(30.0, 0.0),
-                bessel_j_miller(0, Complex64::new(30.0, 0.0)),
-            ),
-            // z = -30 (pure real negative)
-            (
-                "Real -30",
-                0,
-                Complex64::new(-30.0, 0.0),
-                bessel_j_miller(0, Complex64::new(-30.0, 0.0)),
-            ),
-        ];
-
-        println!("\n=== Asymptotic vs Miller for n=0 at various z ===");
-        for (label, n, z, ref_val) in &cases {
-            let j_asym = bessel_j_asymptotic(*n, *z);
-            let h1 = hankel1_asymptotic(*n, *z);
-            let h2 = hankel2_asymptotic(*n, *z);
-            let err = if ref_val.norm() < 1e-15 {
-                (j_asym - ref_val).norm()
-            } else {
-                (j_asym - ref_val).norm() / ref_val.norm()
-            };
-            println!("{:14}: z=({:>6.1},{:>5.1}) asym_err={:.2e}  |H1|={:.4e} |H2|={:.4e} |(H1+H2)/2|={:.4e} |ref|={:.4e}",
-                label, z.re, z.im, err, h1.norm(), h2.norm(), ((h1+h2)/2.0).norm(), ref_val.norm());
-        }
-    }
-
-    #[test]
-    fn diagnose_algo_comparison() {
-        // n=0 at the problematic angle
-        let r = 30.39195382313201_f64;
-        let theta = 2.9762456718219092_f64;
-        let z = Complex64::new(r * theta.cos(), r * theta.sin());
-        let expected = Complex64::new(-5.8537694126084805, -9.042308585991176);
-
-        let j_asym = bessel_j_asymptotic(0, z);
-        let j_mill = bessel_j_miller(0, z);
-        let j_ser = bessel_j_series(0, z);
-        let h1 = hankel1_asymptotic(0, z);
-        let h2 = hankel2_asymptotic(0, z);
-
-        println!("\nn=0, z=({:.4},{:.4}), |z|={:.4}", z.re, z.im, z.norm());
-        println!("expected:  ({:.15e}, {:.15e})", expected.re, expected.im);
-        println!(
-            "asym(h1h2):({:.15e}, {:.15e}) err={:.2e}",
-            j_asym.re,
-            j_asym.im,
-            (j_asym - expected).norm() / expected.norm()
-        );
-        println!(
-            "miller:    ({:.15e}, {:.15e}) err={:.2e}",
-            j_mill.re,
-            j_mill.im,
-            (j_mill - expected).norm() / expected.norm()
-        );
-        println!(
-            "series:    ({:.15e}, {:.15e}) err={:.2e}",
-            j_ser.re,
-            j_ser.im,
-            (j_ser - expected).norm() / expected.norm()
-        );
-        println!(
-            "|H1|={:.6e}, |H2|={:.6e}, |H2/H1|={:.1}",
-            h1.norm(),
-            h2.norm(),
-            h2.norm() / h1.norm()
-        );
-
-        // Also test n=0 at r=6.21
-        let r2 = 6.2101694189156165_f64;
-        let theta2 = 0.3306939635357677_f64;
-        let z2 = Complex64::new(r2 * theta2.cos(), r2 * theta2.sin());
-        let exp2 = Complex64::new(0.6060728635027623, 1.0272445013386244);
-        let j2_asym = bessel_j_asymptotic(0, z2);
-        let j2_mill = bessel_j_miller(0, z2);
-        let j2_ser = bessel_j_series(0, z2);
-        println!("\nn=0, z=({:.4},{:.4}), |z|={:.4}", z2.re, z2.im, z2.norm());
-        println!("expected:  ({:.15e}, {:.15e})", exp2.re, exp2.im);
-        println!(
-            "asym(h1h2):({:.15e}, {:.15e}) err={:.2e}",
-            j2_asym.re,
-            j2_asym.im,
-            (j2_asym - exp2).norm() / exp2.norm()
-        );
-        println!(
-            "miller:    ({:.15e}, {:.15e}) err={:.2e}",
-            j2_mill.re,
-            j2_mill.im,
-            (j2_mill - exp2).norm() / exp2.norm()
-        );
-        println!(
-            "series:    ({:.15e}, {:.15e}) err={:.2e}",
-            j2_ser.re,
-            j2_ser.im,
-            (j2_ser - exp2).norm() / exp2.norm()
-        );
-    }
-
-    /// Diagnose which angles cause errors at a given radius and order.
-    #[test]
-    fn diagnose_per_angle_errors() {
-        let r = 30.39195382313201_f64;
-        let angles_and_expected: Vec<(f64, (f64, f64))> = vec![
-            (0.0, (-0.03477788848272825, 3.469446951953614e-18)),
-            (
-                0.3306939635357677,
-                (-1382.6275021454458, -213.3234763703907),
-            ),
-            (0.6613879270715354, (-338160.5788035898, 9275993.117730552)),
-            (0.992081890607303, (-6613236194.86076, 4753157673.184689)),
-            (1.3227758541430708, (224585675204.88672, -393842137797.5656)),
-            (1.6534698176788385, (-809681933409.5487, 646143275259.1244)),
-            (1.984163781214606, (74950974939.76328, -47666655870.90963)),
-            (2.3148577447503738, (78239842.2365667, 364702230.0513121)),
-            (2.6455517082861415, (68448.89656846572, 120760.0286668394)),
-            (
-                2.9762456718219092,
-                (-5.8537694126084805, -9.042308585991176),
-            ),
-            (3.306939635357677, (-5.853769412608403, 9.042308585991124)),
-            (3.6376335988934447, (68448.89656846496, -120760.02866683899)),
-            (3.968327562429212, (78239842.23656052, -364702230.051308)),
-            (4.29902152596498, (74950974939.76364, 47666655870.90786)),
-            (4.6297154895007475, (-809681933409.5579, -646143275259.1133)),
-            (4.960409453036515, (224585675204.8931, 393842137797.564)),
-            (5.291103416572283, (-6613236194.860839, -4753157673.184674)),
-            (5.621797380108051, (-338160.5788036227, -9275993.117730618)),
-            (5.9524913436438185, (-1382.627502145458, 213.32347637039246)),
-            (
-                6.283185307179586,
-                (-0.03477788848272825, -1.052977149917922e-15),
-            ),
-        ];
-
-        println!("\n=== n=0, r={:.4} per-angle diagnosis ===", r);
-        for (theta, (re_exp, im_exp)) in &angles_and_expected {
-            let z = Complex64::new(r * theta.cos(), r * theta.sin());
-            let expected = Complex64::new(*re_exp, *im_exp);
-            let computed = bessel_j(0, z);
-            let rel_err = if expected.norm() < 1e-12 {
-                (computed - expected).norm()
-            } else {
-                (computed - expected).norm() / expected.norm()
-            };
-
-            // Determine which algorithm is used
-            let znorm = z.norm();
-            let cancel_param = z.re * z.re - z.im * z.im;
-            let algo = if z.im.abs() >= 5.0 && znorm >= 5.0 {
-                "asym(dom)"
-            } else if znorm > 25.0 {
-                "asym(h1h2)"
-            } else if cancel_param < 196.0 {
-                "series"
-            } else {
-                "miller"
-            };
-
-            if rel_err > 1e-10 {
-                println!(
-                    "  θ={:.3} z=({:>8.2},{:>8.2}) |Im|={:.2} algo={:<12} rel_err={:.2e}",
-                    theta,
-                    z.re,
-                    z.im,
-                    z.im.abs(),
-                    algo,
-                    rel_err
-                );
-            }
-        }
     }
 
     #[test]
