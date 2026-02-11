@@ -396,7 +396,6 @@ fn artifacts_path(filename: &str) -> String {
 }
 
 #[test]
-#[ignore]
 fn validate_bessel_j_against_scipy() {
     let data_path = artifacts_path("bessel_j_evaluations.txt");
     let sample_size = get_sample_size();
@@ -432,53 +431,6 @@ fn validate_hankel1_against_scipy() {
         "Max relative error {:.2e} exceeds threshold 1e-6",
         report.max_relative_error
     );
-}
-
-#[test]
-#[ignore] // Run with: cargo test validate_bessel_detailed_report -- --ignored --nocapture
-fn validate_bessel_detailed_report() {
-    let bessel_j_path = artifacts_path("bessel_j_evaluations.txt");
-    let hankel1_path = artifacts_path("hankel1_evaluations.txt");
-
-    let bessel_j_report = run_validation(&bessel_j_path, "Bessel J", bessel_j, None);
-    let hankel1_report = run_validation(&hankel1_path, "Hankel H1", hankel1, None);
-
-    print_report(&bessel_j_report);
-    print_report(&hankel1_report);
-
-    // Write summary to file
-    let report_path = artifacts_path("validation_report.txt");
-    let mut file = File::create(&report_path).expect("Failed to create report file");
-
-    writeln!(file, "Bessel Function Validation Report").unwrap();
-    writeln!(file, "==================================\n").unwrap();
-
-    for report in [&bessel_j_report, &hankel1_report] {
-        writeln!(file, "Function: {}", report.function_name).unwrap();
-        writeln!(file, "Total points: {}", report.total_points).unwrap();
-        writeln!(
-            file,
-            "Points passing: {} ({:.3}%)",
-            report.points_passing,
-            100.0 * report.points_passing as f64 / report.total_points as f64
-        )
-        .unwrap();
-        writeln!(
-            file,
-            "Max relative error: {:.6e}",
-            report.max_relative_error
-        )
-        .unwrap();
-        writeln!(
-            file,
-            "Mean relative error: {:.6e}",
-            report.mean_relative_error
-        )
-        .unwrap();
-        writeln!(file).unwrap();
-    }
-
-    println!("Detailed report written to: {}", report_path);
 }
 
 #[test]
