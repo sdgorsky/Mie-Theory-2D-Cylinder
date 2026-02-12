@@ -5,18 +5,17 @@
 
 use crate::bessel::{bessel_j, bessel_j_derivative, hankel1, hankel1_derivative};
 use num_complex::Complex64;
-use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
 /// Polarization of the incident electromagnetic wave.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Polarization {
     TM, // Transverse-Magnetic: Electric field parallel to cylinder axis (Ez)
     TE, // Transverse-Electric: Magnetic field parallel to cylinder axis (Hz)
 }
 
 /// Complex material properties.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct Material {
     pub permittivity_real: f64,
     pub permittivity_imag: f64,
@@ -40,7 +39,7 @@ impl Material {
 }
 
 /// Input parameters for scattering calculation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ScatteringParams {
     /// Wavelength (unitless, diameter is fixed at 1)
     pub wavelength: f64,
@@ -53,7 +52,7 @@ pub struct ScatteringParams {
 }
 
 /// Result of the scattering calculation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ScatteringResult {
     /// Incident wave coefficients a_n (n = -max_order to +max_order)
     pub incident_coefficients: Vec<Complex64>,
@@ -155,28 +154,6 @@ mod tests {
 
     fn approx_eq(a: Complex64, b: Complex64, tol: f64) -> bool {
         (a - b).norm() < tol
-    }
-
-    #[test]
-    fn test_serialization_format() {
-        // Verify that Complex64 serializes as [re, im] array for JS compatibility
-        let c = Complex64::new(1.5, -2.5);
-        let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(
-            json, "[1.5,-2.5]",
-            "Complex64 should serialize as [re, im] array"
-        );
-
-        // Verify ScatteringResult structure
-        let result = ScatteringResult {
-            incident_coefficients: vec![Complex64::new(1.0, 0.0)],
-            scattering_coefficients: vec![Complex64::new(0.5, -0.5)],
-            internal_coefficients: vec![Complex64::new(0.0, 1.0)],
-            orders: vec![0],
-        };
-        let json = serde_json::to_string(&result).unwrap();
-        assert!(json.contains("\"incident_coefficients\":[[1.0,0.0]]"));
-        assert!(json.contains("\"orders\":[0]"));
     }
 
     #[test]

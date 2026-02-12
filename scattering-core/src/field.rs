@@ -10,7 +10,6 @@
 use crate::bessel::{bessel_j, hankel1};
 use crate::scattering::RADIUS;
 use num_complex::Complex64;
-use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
 /// Grid resolution for field computation
@@ -149,7 +148,7 @@ impl BesselSpline {
 // ============================================================================
 
 /// Input parameters for field computation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FieldParams {
     /// Wavelength (relative to diameter = 1)
     pub wavelength: f64,
@@ -175,7 +174,7 @@ pub struct FieldParams {
 }
 
 /// Result of field computation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FieldResult {
     pub field_real: Vec<f64>, // Real part of complex field values (row-major, GRID_SIZE x GRID_SIZE)
     pub field_imag: Vec<f64>, // Imaginary part of complex field values

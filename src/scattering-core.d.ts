@@ -12,16 +12,6 @@ declare module "scattering-core" {
     out_field_imag: Float64Array,
   ): void;
 
-  export function compute_scattering(
-    wavelength: number,
-    permittivity_real: number,
-    permittivity_imag: number,
-    permeability_real: number,
-    permeability_imag: number,
-    polarization: string,
-    max_order: number,
-  ): unknown;
-
   export function get_field_grid_size(): number;
   export function get_field_view_size(): number;
   export function get_parameter_bounds(): {
