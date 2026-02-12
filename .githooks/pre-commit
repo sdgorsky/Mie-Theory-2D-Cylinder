@@ -49,14 +49,14 @@ if [ -n "$RUST_FILES" ]; then
         echo -e "${GREEN}  ✓ Clippy OK${NC}"
     fi
 
-    # Run Bessel validation tests (quick sample)
-    echo "  Running Bessel validation tests..."
-    if ! (cd "$REPO_ROOT/scattering-core" && BESSEL_SAMPLE_SIZE=1000 cargo test validate_ --release --quiet 2>/dev/null); then
-        echo -e "${RED}  ✗ Bessel validation tests failed${NC}"
-        echo "  Run 'make test-bessel' for detailed output"
+    # Run Rust tests
+    echo "  Running Rust tests..."
+    if ! (cd "$REPO_ROOT/scattering-core" && cargo test --quiet 2>/dev/null); then
+        echo -e "${RED}  ✗ Rust tests failed${NC}"
+        echo "  Run 'make test' for detailed output"
         FAILED=1
     else
-        echo -e "${GREEN}  ✓ Bessel validation OK${NC}"
+        echo -e "${GREEN}  ✓ Rust tests OK${NC}"
     fi
 fi
 

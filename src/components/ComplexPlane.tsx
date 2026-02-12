@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useRef, useCallback, useState } from "react";
 import type { ComplexObj } from "../types/cylinder";
 import type { ParameterBounds } from "../hooks/useScattering";
