@@ -648,6 +648,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn test_field_values_nonzero() {
         let params = ScatteringParams {
             wavelength: 1.0,

@@ -5,7 +5,7 @@ use scattering_core::bessel::{bessel_i, bessel_j, bessel_k, hankel1};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 
 /// A single reference point from SciPy data.
 #[derive(Debug, Clone)]
@@ -61,9 +61,7 @@ struct AccuracyReport {
     function_name: String,
     total_points: usize,
     points_passing: usize,
-    max_absolute_error: f64,
     max_relative_error: f64,
-    mean_absolute_error: f64,
     mean_relative_error: f64,
     max_rel_error_point: Option<FailureDetail>,
     /// Key: (order, radius_bits) — radius_bits is f64::to_bits() for exact grouping
@@ -134,9 +132,7 @@ where
 
     let mut total_points = 0usize;
     let mut points_passing = 0usize;
-    let mut max_absolute_error = 0.0f64;
     let mut max_relative_error = 0.0f64;
-    let mut sum_absolute_error = 0.0f64;
     let mut sum_relative_error = 0.0f64;
     let mut max_rel_error_point: Option<FailureDetail> = None;
     let mut errors_by_order_radius: BTreeMap<(i32, u64), GroupStats> = BTreeMap::new();
@@ -173,7 +169,6 @@ where
                 absolute_error: f64::INFINITY,
                 relative_error: f64::INFINITY,
             };
-            max_absolute_error = f64::INFINITY;
             max_relative_error = f64::INFINITY;
             max_rel_error_point = Some(detail.clone());
             worst_cases.push(detail);
@@ -183,7 +178,6 @@ where
         let (abs_err, rel_err) = compare(computed, point.expected);
 
         total_points += 1;
-        sum_absolute_error += abs_err;
         sum_relative_error += rel_err;
 
         if rel_err < rel_err_threshold {
@@ -201,10 +195,6 @@ where
                 relative_error: rel_err,
             });
         }
-        if abs_err > max_absolute_error {
-            max_absolute_error = abs_err;
-        }
-
         // Track by (order, radius)
         let key = (point.order, point.radius.to_bits());
         errors_by_order_radius
@@ -236,13 +226,7 @@ where
         function_name: function_name.to_string(),
         total_points,
         points_passing,
-        max_absolute_error,
         max_relative_error,
-        mean_absolute_error: if total_points > 0 {
-            sum_absolute_error / total_points as f64
-        } else {
-            0.0
-        },
         mean_relative_error: if total_points > 0 {
             sum_relative_error / total_points as f64
         } else {
