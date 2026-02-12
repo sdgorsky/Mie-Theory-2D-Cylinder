@@ -1,0 +1,5 @@
+node_modules
+dist
+scattering-core/target
+scattering-core/pkg
+.git

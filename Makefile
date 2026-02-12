@@ -1,4 +1,4 @@
-.PHONY: setup run build build-wasm clean format test help
+.PHONY: setup run build build-wasm clean format test docker help
 
 # Colors for output
 RED := \033[0;31m
@@ -13,12 +13,14 @@ help:
 	@echo "  make build    - Build WASM and frontend"
 	@echo "  make format   - Format and lint Rust and TypeScript code"
 	@echo "  make test     - Run tests"
+	@echo "  make docker   - Build and run in Docker"
 	@echo "  make clean    - Clean build artifacts"
 
 setup:
 	@echo "Checking and installing dependencies..."
 	@echo ""
 	@FAIL=0; \
+	if [ -n "$$CI" ]; then AUTO=y; else AUTO=; fi; \
 	if ! command -v node &> /dev/null; then \
 		echo "$(RED)✗ node is not installed$(NC)"; \
 		echo "  Install Node.js from https://nodejs.org/ or via your package manager"; \
@@ -35,7 +37,7 @@ setup:
 	fi; \
 	if ! command -v rustup &> /dev/null; then \
 		echo "$(YELLOW)✗ Rust is not installed$(NC)"; \
-		read -p "  Install Rust via rustup? [y/N] " confirm; \
+		if [ -n "$$AUTO" ]; then confirm=y; else read -p "  Install Rust via rustup? [y/N] " confirm; fi; \
 		if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
 			curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y; \
 			. "$$HOME/.cargo/env"; \
@@ -49,7 +51,7 @@ setup:
 	if command -v rustup &> /dev/null; then \
 		if ! rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then \
 			echo "$(YELLOW)✗ wasm32-unknown-unknown target missing$(NC)"; \
-			read -p "  Install wasm32 target? [y/N] " confirm; \
+			if [ -n "$$AUTO" ]; then confirm=y; else read -p "  Install wasm32 target? [y/N] " confirm; fi; \
 			if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
 				rustup target add wasm32-unknown-unknown; \
 				echo "$(GREEN)✓ wasm32-unknown-unknown target installed$(NC)"; \
@@ -61,7 +63,7 @@ setup:
 		fi; \
 		if ! command -v wasm-pack &> /dev/null; then \
 			echo "$(YELLOW)✗ wasm-pack is not installed$(NC)"; \
-			read -p "  Install wasm-pack? [y/N] " confirm; \
+			if [ -n "$$AUTO" ]; then confirm=y; else read -p "  Install wasm-pack? [y/N] " confirm; fi; \
 			if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
 				cargo install wasm-pack; \
 				echo "$(GREEN)✓ wasm-pack installed$(NC)"; \
@@ -73,7 +75,7 @@ setup:
 		fi; \
 		if ! command -v rustfmt &> /dev/null; then \
 			echo "$(YELLOW)✗ rustfmt is not installed$(NC)"; \
-			read -p "  Install rustfmt? [y/N] " confirm; \
+			if [ -n "$$AUTO" ]; then confirm=y; else read -p "  Install rustfmt? [y/N] " confirm; fi; \
 			if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
 				rustup component add rustfmt; \
 				echo "$(GREEN)✓ rustfmt installed$(NC)"; \
@@ -85,7 +87,7 @@ setup:
 		fi; \
 		if ! rustup component list 2>/dev/null | grep -q "clippy.*installed"; then \
 			echo "$(YELLOW)✗ clippy is not installed$(NC)"; \
-			read -p "  Install clippy? [y/N] " confirm; \
+			if [ -n "$$AUTO" ]; then confirm=y; else read -p "  Install clippy? [y/N] " confirm; fi; \
 			if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
 				rustup component add clippy; \
 				echo "$(GREEN)✓ clippy installed$(NC)"; \
@@ -98,7 +100,7 @@ setup:
 	fi; \
 	if command -v npm &> /dev/null && [ ! -d "node_modules" ]; then \
 		echo "$(YELLOW)✗ node_modules not installed$(NC)"; \
-		read -p "  Run npm install? [y/N] " confirm; \
+		if [ -n "$$AUTO" ]; then confirm=y; else read -p "  Run npm install? [y/N] " confirm; fi; \
 		if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
 			npm install; \
 			echo "$(GREEN)✓ npm dependencies installed$(NC)"; \
@@ -161,6 +163,14 @@ test:
 	@echo "Running Rust tests..."
 	cd scattering-core && cargo test
 	@echo "$(GREEN)All tests passed!$(NC)"
+
+# Build and run in Docker
+docker:
+	@echo "Building Docker image..."
+	docker build -t 2d-scattering .
+	@echo "$(GREEN)Docker image built!$(NC)"
+	@echo "Starting container at http://localhost:8080..."
+	docker run --rm -p 8080:80 2d-scattering
 
 # Clean build artifacts
 clean:
