@@ -607,7 +607,7 @@ pub fn bessel_j(n: i32, z: Complex64) -> Complex64 {
 }
 
 /// Bessel function of the second kind Y_n(z) for complex argument.
-pub fn bessel_y(n: i32, z: Complex64) -> Complex64 {
+pub(crate) fn bessel_y(n: i32, z: Complex64) -> Complex64 {
     // Handle negative orders: Y_{-n}(z) = (-1)^n * Y_n(z)
     if n < 0 {
         let sign = if (-n) % 2 == 0 { 1.0 } else { -1.0 };

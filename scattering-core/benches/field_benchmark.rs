@@ -24,16 +24,6 @@ fn calculate_field() {
         permittivity_imag: params.material.permittivity_imag,
         permeability_real: params.material.permeability_real,
         permeability_imag: params.material.permeability_imag,
-        incident_coeffs_real: scattering
-            .incident_coefficients
-            .iter()
-            .map(|c| c.re)
-            .collect(),
-        incident_coeffs_imag: scattering
-            .incident_coefficients
-            .iter()
-            .map(|c| c.im)
-            .collect(),
         scattering_coeffs_real: scattering
             .scattering_coefficients
             .iter()
@@ -55,6 +45,7 @@ fn calculate_field() {
             .map(|c| c.im)
             .collect(),
         orders: scattering.orders,
+        view_size: 5.0,
     };
 
     let _result = compute_field(&field_params);

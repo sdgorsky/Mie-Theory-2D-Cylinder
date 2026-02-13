@@ -136,16 +136,12 @@ pub fn compute_all(
 
     // Decompose Complex64 → real/imag for FieldParams (stays on WASM heap)
     let n_coeffs = scattering.orders.len();
-    let mut inc_re = Vec::with_capacity(n_coeffs);
-    let mut inc_im = Vec::with_capacity(n_coeffs);
     let mut scat_re = Vec::with_capacity(n_coeffs);
     let mut scat_im = Vec::with_capacity(n_coeffs);
     let mut int_re = Vec::with_capacity(n_coeffs);
     let mut int_im = Vec::with_capacity(n_coeffs);
 
     for i in 0..n_coeffs {
-        inc_re.push(scattering.incident_coefficients[i].re);
-        inc_im.push(scattering.incident_coefficients[i].im);
         scat_re.push(scattering.scattering_coefficients[i].re);
         scat_im.push(scattering.scattering_coefficients[i].im);
         int_re.push(scattering.internal_coefficients[i].re);
@@ -158,8 +154,6 @@ pub fn compute_all(
         permittivity_imag,
         permeability_real,
         permeability_imag,
-        incident_coeffs_real: inc_re,
-        incident_coeffs_imag: inc_im,
         scattering_coeffs_real: scat_re,
         scattering_coeffs_imag: scat_im,
         internal_coeffs_real: int_re,
@@ -186,7 +180,3 @@ pub fn get_info() -> String {
          Supports TM and TE polarizations.",
     )
 }
-
-// Re-export types for testing
-pub use field::FieldResult as FieldResultType;
-pub use scattering::ScatteringResult as ScatteringResultType;

@@ -158,9 +158,6 @@ pub struct FieldParams {
     /// Complex relative permeability
     pub permeability_real: f64,
     pub permeability_imag: f64,
-    /// Incident wave coefficients (a_n) - real and imaginary parts interleaved
-    pub incident_coeffs_real: Vec<f64>,
-    pub incident_coeffs_imag: Vec<f64>,
     /// Scattering coefficients (b_n) - real and imaginary parts
     pub scattering_coeffs_real: Vec<f64>,
     pub scattering_coeffs_imag: Vec<f64>,
@@ -377,75 +374,74 @@ fn compute_exterior_field_spline(
     incident + scattered
 }
 
-/// Compute the field inside the cylinder (non-optimized, for testing).
-#[allow(dead_code)]
-fn compute_interior_field(
-    c_n: &[Complex64],
-    orders: &[i32],
-    k1: Complex64,
-    r: f64,
-    theta: f64,
-) -> Complex64 {
-    let k1_r = k1 * r;
-    let mut field = Complex64::new(0.0, 0.0);
-
-    for (i, &n) in orders.iter().enumerate() {
-        // J_n(k1*r)
-        let jn = bessel_j(n, k1_r);
-
-        // exp(i*n*θ)
-        let n_theta = n as f64 * theta;
-        let exp_intheta = Complex64::new(n_theta.cos(), n_theta.sin());
-
-        field += c_n[i] * jn * exp_intheta;
-    }
-
-    field
-}
-
-/// Compute the field outside the cylinder (non-optimized, for testing).
-#[allow(dead_code)]
-fn compute_exterior_field(
-    b_n: &[Complex64],
-    orders: &[i32],
-    k0: f64,
-    r: f64,
-    theta: f64,
-) -> Complex64 {
-    let k0_r = Complex64::new(k0 * r, 0.0);
-
-    // Incident plane wave: exp(i*k0*x) where x = r*cos(theta)
-    let k0x = k0 * r * theta.cos();
-    let incident = Complex64::new(k0x.cos(), k0x.sin());
-
-    // Scattered field: Σ_n b_n * H_n(k0*r) * exp(i*n*θ)
-    let mut scattered = Complex64::new(0.0, 0.0);
-    for (i, &n) in orders.iter().enumerate() {
-        let hn = hankel1(n, k0_r);
-        let n_theta = n as f64 * theta;
-        let exp_intheta = Complex64::new(n_theta.cos(), n_theta.sin());
-        scattered += b_n[i] * hn * exp_intheta;
-    }
-
-    incident + scattered
-}
-
-#[allow(dead_code)]
-fn linspace(start: f64, end: f64, n_points: usize) -> Vec<f64> {
-    if n_points == 0 {
-        return Vec::new();
-    }
-    let step = (end - start) / (n_points - 1) as f64;
-    let mut vec = Vec::with_capacity(n_points);
-    for i in 0..n_points {
-        vec.push(start + i as f64 * step);
-    }
-    vec
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bessel::{bessel_j, hankel1};
+
+    /// Compute the field inside the cylinder (non-optimized, for testing).
+    fn compute_interior_field(
+        c_n: &[Complex64],
+        orders: &[i32],
+        k1: Complex64,
+        r: f64,
+        theta: f64,
+    ) -> Complex64 {
+        let k1_r = k1 * r;
+        let mut field = Complex64::new(0.0, 0.0);
+
+        for (i, &n) in orders.iter().enumerate() {
+            // J_n(k1*r)
+            let jn = bessel_j(n, k1_r);
+
+            // exp(i*n*θ)
+            let n_theta = n as f64 * theta;
+            let exp_intheta = Complex64::new(n_theta.cos(), n_theta.sin());
+
+            field += c_n[i] * jn * exp_intheta;
+        }
+
+        field
+    }
+
+    /// Compute the field outside the cylinder (non-optimized, for testing).
+    fn compute_exterior_field(
+        b_n: &[Complex64],
+        orders: &[i32],
+        k0: f64,
+        r: f64,
+        theta: f64,
+    ) -> Complex64 {
+        let k0_r = Complex64::new(k0 * r, 0.0);
+
+        // Incident plane wave: exp(i*k0*x) where x = r*cos(theta)
+        let k0x = k0 * r * theta.cos();
+        let incident = Complex64::new(k0x.cos(), k0x.sin());
+
+        // Scattered field: Σ_n b_n * H_n(k0*r) * exp(i*n*θ)
+        let mut scattered = Complex64::new(0.0, 0.0);
+        for (i, &n) in orders.iter().enumerate() {
+            let hn = hankel1(n, k0_r);
+            let n_theta = n as f64 * theta;
+            let exp_intheta = Complex64::new(n_theta.cos(), n_theta.sin());
+            scattered += b_n[i] * hn * exp_intheta;
+        }
+
+        incident + scattered
+    }
+
+    fn linspace(start: f64, end: f64, n_points: usize) -> Vec<f64> {
+        if n_points == 0 {
+            return Vec::new();
+        }
+        let step = (end - start) / (n_points - 1) as f64;
+        let mut vec = Vec::with_capacity(n_points);
+        for i in 0..n_points {
+            vec.push(start + i as f64 * step);
+        }
+        vec
+    }
+
     use crate::scattering::{
         calculate_scattering, Material, Polarization, ScatteringParams, PERMEABILITY_IM_MAX,
         PERMEABILITY_IM_MIN, PERMEABILITY_RE_MAX, PERMEABILITY_RE_MIN, PERMITTIVITY_IM_MAX,
@@ -671,16 +667,6 @@ mod tests {
             permittivity_imag: params.material.permittivity_imag,
             permeability_real: params.material.permeability_real,
             permeability_imag: params.material.permeability_imag,
-            incident_coeffs_real: scattering
-                .incident_coefficients
-                .iter()
-                .map(|c| c.re)
-                .collect(),
-            incident_coeffs_imag: scattering
-                .incident_coefficients
-                .iter()
-                .map(|c| c.im)
-                .collect(),
             scattering_coeffs_real: scattering
                 .scattering_coefficients
                 .iter()
