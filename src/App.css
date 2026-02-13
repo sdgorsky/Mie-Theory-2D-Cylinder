@@ -38,37 +38,6 @@
   gap: 1rem;
 }
 
-.compute-section {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.compute-button {
-  padding: 0.8rem 2rem;
-  font-size: 1rem;
-  font-weight: 600;
-  background: linear-gradient(135deg, #00d4ff, #00a8cc);
-  color: #1a1a2a;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.compute-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
-}
-
-.compute-button:disabled {
-  background: #444;
-  color: #888;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
 .status {
   font-size: 0.85rem;
   color: #888;

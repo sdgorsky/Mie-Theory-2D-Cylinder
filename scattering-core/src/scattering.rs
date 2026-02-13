@@ -54,8 +54,6 @@ pub struct ScatteringParams {
 /// Result of the scattering calculation.
 #[derive(Debug, Clone)]
 pub struct ScatteringResult {
-    /// Incident wave coefficients a_n (n = -max_order to +max_order)
-    pub incident_coefficients: Vec<Complex64>,
     /// Scattering coefficients b_n (exterior field)
     pub scattering_coefficients: Vec<Complex64>,
     /// Internal coefficients c_n (interior field)
@@ -91,24 +89,20 @@ pub fn calculate_scattering(params: &ScatteringParams) -> ScatteringResult {
     let kor = Complex64::new(k0 * RADIUS, 0.0); // k0 * a
     let knr = kor * params.material.refractive_index(); // k1 * a = k0 * m * a
 
-    let mut an_vec = Vec::new();
     let mut bn_vec = Vec::new();
     let mut cn_vec = Vec::new();
     let mut l_vec = Vec::new();
 
     // Calculate coefficients for l = -max_order to +max_order
     for l in -params.max_order..=params.max_order {
-        let an = Complex64::i().powi(l);
         let (bn, cn) = calculate_coefficients_for_order(params, l, kor, knr, params.polarization);
 
         l_vec.push(l);
-        an_vec.push(an);
         bn_vec.push(bn);
         cn_vec.push(cn);
     }
 
     ScatteringResult {
-        incident_coefficients: an_vec,
         scattering_coefficients: bn_vec,
         internal_coefficients: cn_vec,
         orders: l_vec,

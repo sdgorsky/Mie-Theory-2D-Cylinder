@@ -86,13 +86,6 @@
   margin-bottom: 0.25rem;
 }
 
-.section-hint {
-  margin: 0 0 0.5rem 0;
-  font-size: 0.75rem;
-  color: #666;
-  font-style: italic;
-}
-
 .wavelength-control,
 .order-control {
   display: flex;
@@ -108,13 +101,6 @@
 .wavelength-control input[type="number"],
 .order-control input[type="number"] {
   width: 80px;
-}
-
-.derived-value {
-  margin-top: 0.5rem;
-  font-size: 0.8rem;
-  color: #00d4ff;
-  font-family: monospace;
 }
 
 /* Polarization buttons */
@@ -291,39 +277,4 @@ input[type="range"]::-moz-range-thumb {
   background: #00d4ff;
   cursor: pointer;
   border: none;
-}
-
-/* Material info section */
-.material-info {
-  background: #252535;
-  border-radius: 6px;
-  padding: 1rem;
-  margin-top: 1rem;
-}
-
-.material-info h3 {
-  margin: 0 0 0.75rem 0;
-  font-size: 0.9rem;
-  color: #888;
-}
-
-.material-info table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.material-info td {
-  padding: 0.25rem 0;
-  font-family: monospace;
-  font-size: 0.85rem;
-}
-
-.material-info td:first-child {
-  color: #888;
-  width: 140px;
-}
-
-.material-info td:last-child {
-  color: #e0e0e0;
-  text-align: right;
 }
