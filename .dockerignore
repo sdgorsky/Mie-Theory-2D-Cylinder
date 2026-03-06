@@ -3,3 +3,4 @@ dist
 scattering-core/target
 scattering-core/pkg
 .git
+.venv
