@@ -11,10 +11,14 @@ node_modules
 dist
 dist-ssr
 *.local
+wasm-pkg/
+.venv/
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
+*.code-workspace
 .idea
 .DS_Store
 *.suo

@@ -1,8 +1,6 @@
 pub mod bessel;
 pub mod field;
 pub mod scattering;
-mod utils;
-
 use field::{compute_field, FieldParams, DEFAULT_VIEW_SIZE, GRID_SIZE};
 use scattering::{
     calculate_scattering, Material, Polarization, ScatteringParams, MAX_ORDER_MAX, MAX_ORDER_MIN,
@@ -15,7 +13,8 @@ use wasm_bindgen::prelude::*;
 /// Initialize panic hook for better error messages in browser console.
 #[wasm_bindgen(start)]
 pub fn init() {
-    utils::set_panic_hook();
+    #[cfg(feature = "console_error_panic_hook")]
+    console_error_panic_hook::set_once();
 }
 
 /// Get the grid size used for field computation.
