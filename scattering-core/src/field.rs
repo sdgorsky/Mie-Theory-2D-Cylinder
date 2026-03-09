@@ -13,7 +13,7 @@ use num_complex::Complex64;
 use std::f64::consts::PI;
 
 /// Grid resolution for field computation
-pub const GRID_SIZE: usize = 256;
+pub const GRID_SIZE: usize = 512;
 
 /// Default view size in units of cylinder diameter (5D x 5D)
 pub const DEFAULT_VIEW_SIZE: f64 = 5.0;

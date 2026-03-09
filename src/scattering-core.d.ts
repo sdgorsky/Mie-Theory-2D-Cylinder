@@ -28,7 +28,6 @@ declare module "scattering-core" {
     max_order_min: number;
     max_order_max: number;
   };
-  export function get_info(): string;
   export function init(): void;
 
   export default function __wbg_init(): Promise<unknown>;

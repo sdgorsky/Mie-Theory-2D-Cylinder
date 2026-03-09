@@ -22,12 +22,7 @@ console_error_panic_hook = { version = "0.1.7", optional = true }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
-criterion = { version = "0.8", features = ["html_reports"] }
 
 [profile.release]
 opt-level = 3
 lto = true
-
-[[bench]]
-name = "field_benchmark"
-harness = false

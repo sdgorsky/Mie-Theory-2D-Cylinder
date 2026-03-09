@@ -167,15 +167,3 @@ pub fn compute_all(
     out_field_real.copy_from(&field.field_real);
     out_field_imag.copy_from(&field.field_imag);
 }
-
-/// Get information about the scattering computation.
-#[wasm_bindgen]
-pub fn get_info() -> String {
-    String::from(
-        "2D Electromagnetic Scattering Calculator\n\
-         Computes scattering from an infinite cylinder.\n\
-         Cylinder diameter = 1 (unitless)\n\
-         Field grid: 128x128 over 5D x 5D area\n\
-         Supports TM and TE polarizations.",
-    )
-}
