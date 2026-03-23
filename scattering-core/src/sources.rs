@@ -1,7 +1,8 @@
-//! Source coefficient generation for 2D cylinder scattering.
+//! Source definitions for 2D cylinder scattering.
 //!
-//! Each source type provides coefficients a_n that describe how the
-//! incident field decomposes into cylindrical harmonics of order n.
+//! Each source type provides:
+//! - Coefficients a_n: how the incident field decomposes into cylindrical harmonics
+//! - Incident field: the spatial field value at any point (x, y)
 
 use num_complex::Complex64;
 
@@ -26,6 +27,24 @@ pub fn compute_source_coefficients(source: Source, orders: &[i32]) -> Vec<Comple
 /// i.e. the Jacobi–Anger identity coefficients.
 fn compute_planewave_coefficients(orders: &[i32]) -> Vec<Complex64> {
     orders.iter().map(|&n| Complex64::i().powi(n)).collect()
+}
+
+/// Compute the incident field at a single point (x, y).
+///
+/// Returns the physical field value in real space, not a cylindrical
+/// harmonic coefficient.
+pub fn compute_incident_field(source: Source, k0: f64, x: f64, y: f64) -> Complex64 {
+    match source {
+        Source::PlaneWave => compute_planewave_field(k0, x, y),
+    }
+}
+
+/// Plane-wave incident field: exp(i k0 x).
+///
+/// The plane wave propagates in the +x direction and is independent of y.
+fn compute_planewave_field(k0: f64, x: f64, _y: f64) -> Complex64 {
+    let phase = k0 * x;
+    Complex64::new(phase.cos(), phase.sin())
 }
 
 #[cfg(test)]

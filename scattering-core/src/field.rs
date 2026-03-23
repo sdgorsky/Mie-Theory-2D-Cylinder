@@ -5,10 +5,10 @@
 //!
 //! Optimizations:
 //! - Cubic spline interpolation for Bessel/Hankel functions
-//! - Y-axis symmetry (only compute top half, mirror to bottom)
 
 use crate::bessel::{bessel_j, hankel1};
 use crate::scattering::RADIUS;
+use crate::sources::{compute_incident_field, Source};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -168,6 +168,8 @@ pub struct FieldParams {
     pub orders: Vec<i32>,
     /// View size in cylinder diameters (physical extent of the grid)
     pub view_size: f64,
+    /// Incident field source type
+    pub source: Source,
 }
 
 /// Result of field computation.
@@ -184,13 +186,12 @@ pub struct FieldResult {
     pub y_max: f64,
 }
 
-/// Compute the electric field on a 128x128 grid.
+/// Compute the electric field on a GRID_SIZE x GRID_SIZE grid.
 ///
 /// The grid covers a 5D x 5D area centered on the cylinder (D = diameter = 1).
 /// So the grid spans from -2.5 to +2.5 in both x and y.
 ///
-/// Uses optimized spline interpolation for Bessel/Hankel functions and
-/// y-axis symmetry to compute only half the grid points.
+/// Uses optimized spline interpolation for Bessel/Hankel functions.
 pub fn compute_field(params: &FieldParams) -> FieldResult {
     let n_coeffs = params.orders.len();
 
@@ -247,7 +248,7 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
         .map(|&n| BesselSpline::new_bessel_j(n, k1, 1e-10, RADIUS, SPLINE_POINTS))
         .collect();
 
-    // ===== PHASE 2: Compute field using splines + y-symmetry =====
+    // ===== PHASE 2: Compute field on full grid =====
 
     let total_points = GRID_SIZE * GRID_SIZE;
     let mut field_real = vec![0.0; total_points];
@@ -256,14 +257,11 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
     // Pre-allocate exp(i*n*θ) table — reused for every grid point
     let mut exp_table = vec![Complex64::new(0.0, 0.0); n_coeffs];
 
-    // Only compute top half (y >= 0), mirror to bottom half
-    for iy in 0..GRID_SIZE / 2 {
+    let source = params.source;
+
+    for iy in 0..GRID_SIZE {
         let y = y_max - (iy as f64 + 0.5) * dx;
         let row_offset = iy * GRID_SIZE;
-
-        // Symmetric row index
-        let iy_sym = GRID_SIZE - 1 - iy;
-        let row_offset_sym = iy_sym * GRID_SIZE;
 
         for ix in 0..GRID_SIZE {
             let x = x_min + (ix as f64 + 0.5) * dx;
@@ -278,21 +276,18 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
             fill_exp_intheta(&mut exp_table, cos_theta, sin_theta);
 
             let idx = row_offset + ix;
-            let idx_sym = row_offset_sym + ix;
 
             let field = if r < RADIUS {
-                // Interior field using Bessel J splines
                 compute_interior_field_spline(&c_n, &bessel_splines, r, &exp_table)
             } else {
-                // Exterior field using Hankel splines
-                compute_exterior_field_spline(&b_n, &hankel_splines, k0, r, cos_theta, &exp_table)
+                let incident = compute_incident_field(source, k0, x, y);
+                let scattered =
+                    compute_scattered_field_spline(&b_n, &hankel_splines, r, &exp_table);
+                incident + scattered
             };
 
-            // Fill both point and its y-symmetric counterpart
             field_real[idx] = field.re;
             field_imag[idx] = field.im;
-            field_real[idx_sym] = field.re;
-            field_imag[idx_sym] = field.im;
         }
     }
 
@@ -350,28 +345,20 @@ fn compute_interior_field_spline(
     field
 }
 
-/// Compute exterior field using spline-interpolated Hankel values
+/// Compute scattered field: Σ_n b_n * H_n(k0*r) * exp(i*n*θ)
 #[inline]
-fn compute_exterior_field_spline(
+fn compute_scattered_field_spline(
     b_n: &[Complex64],
     hankel_splines: &[BesselSpline],
-    k0: f64,
     r: f64,
-    cos_theta: f64,
     exp_table: &[Complex64],
 ) -> Complex64 {
-    // Incident plane wave: exp(i*k0*x) where x = r*cos(theta)
-    let k0x = k0 * r * cos_theta;
-    let incident = Complex64::new(k0x.cos(), k0x.sin());
-
-    // Scattered field: Σ_n b_n * H_n(k0*r) * exp(i*n*θ)
     let mut scattered = Complex64::new(0.0, 0.0);
     for i in 0..b_n.len() {
         let hn = hankel_splines[i].eval(r);
         scattered += b_n[i] * hn * exp_table[i];
     }
-
-    incident + scattered
+    scattered
 }
 
 #[cfg(test)]
@@ -693,6 +680,7 @@ mod tests {
                 .collect(),
             orders: scattering.orders,
             view_size: 5.0_f64,
+            source: Source::PlaneWave,
         };
 
         let result = compute_field(&field_params);
