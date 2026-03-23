@@ -448,6 +448,7 @@ mod tests {
         PERMITTIVITY_IM_MIN, PERMITTIVITY_RE_MAX, PERMITTIVITY_RE_MIN, WAVELENGTH_MAX,
         WAVELENGTH_MIN,
     };
+    use crate::sources::Source;
 
     /// Sweep permittivity, permeability, and wavelength to verify the boundary
     /// condition: interior and exterior fields must match at the cylinder surface.
@@ -491,6 +492,7 @@ mod tests {
                                 },
                                 polarization: Polarization::TM,
                                 max_order,
+                                source: Source::PlaneWave,
                             };
 
                             let result = calculate_scattering(&params);
@@ -587,6 +589,7 @@ mod tests {
                                 },
                                 polarization: Polarization::TE,
                                 max_order,
+                                source: Source::PlaneWave,
                             };
 
                             let result = calculate_scattering(&params);
@@ -656,6 +659,7 @@ mod tests {
             },
             polarization: Polarization::TM,
             max_order: 10,
+            source: Source::PlaneWave,
         };
 
         let scattering = calculate_scattering(&params);

@@ -4,6 +4,7 @@
 //! plane wave scattering from an infinite dielectric/magnetic cylinder.
 
 use crate::bessel::{bessel_j, bessel_j_derivative, hankel1, hankel1_derivative};
+use crate::sources::{compute_source_coefficients, Source};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -49,6 +50,8 @@ pub struct ScatteringParams {
     pub polarization: Polarization,
     /// Maximum Bessel order to include in the expansion
     pub max_order: i32,
+    /// Incident field source type
+    pub source: Source,
 }
 
 /// Result of the scattering calculation.
@@ -93,9 +96,13 @@ pub fn calculate_scattering(params: &ScatteringParams) -> ScatteringResult {
     let mut cn_vec = Vec::new();
     let mut l_vec = Vec::new();
 
+    let orders: Vec<i32> = (-params.max_order..=params.max_order).collect();
+    let a_n = compute_source_coefficients(params.source, &orders);
+
     // Calculate coefficients for l = -max_order to +max_order
-    for l in -params.max_order..=params.max_order {
-        let (bn, cn) = calculate_coefficients_for_order(params, l, kor, knr, params.polarization);
+    for (idx, &l) in orders.iter().enumerate() {
+        let (bn, cn) =
+            calculate_coefficients_for_order(params, l, kor, knr, params.polarization, a_n[idx]);
 
         l_vec.push(l);
         bn_vec.push(bn);
@@ -117,9 +124,8 @@ fn calculate_coefficients_for_order(
     kor: Complex64, // free-space size parameterf
     knr: Complex64, // internal size parameter
     polarization: Polarization,
+    an: Complex64, // source coefficient for this order
 ) -> (Complex64, Complex64) {
-    let an = Complex64::i().powi(l);
-
     let jlo = bessel_j(l, kor);
     let jlo_prime = bessel_j_derivative(l, kor);
     let hlo = hankel1(l, kor);
@@ -145,6 +151,7 @@ fn calculate_coefficients_for_order(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sources::Source;
 
     fn approx_eq(a: Complex64, b: Complex64, tol: f64) -> bool {
         (a - b).norm() < tol
@@ -162,6 +169,7 @@ mod tests {
             },
             polarization: Polarization::TM,
             max_order: 5,
+            source: Source::PlaneWave,
         };
 
         let result = calculate_scattering(&params);
@@ -239,6 +247,7 @@ mod tests {
             },
             polarization: Polarization::TM,
             max_order: 3,
+            source: Source::PlaneWave,
         };
 
         let result = calculate_scattering(&params);

@@ -1,6 +1,7 @@
 pub mod bessel;
 pub mod field;
 pub mod scattering;
+pub mod sources;
 use field::{compute_field, FieldParams, DEFAULT_VIEW_SIZE, GRID_SIZE};
 use scattering::{
     calculate_scattering, Material, Polarization, ScatteringParams, MAX_ORDER_MAX, MAX_ORDER_MIN,
@@ -8,6 +9,7 @@ use scattering::{
     PERMITTIVITY_IM_MAX, PERMITTIVITY_IM_MIN, PERMITTIVITY_RE_MAX, PERMITTIVITY_RE_MIN,
     WAVELENGTH_MAX, WAVELENGTH_MIN,
 };
+use sources::Source;
 use wasm_bindgen::prelude::*;
 
 /// Initialize panic hook for better error messages in browser console.
@@ -130,6 +132,7 @@ pub fn compute_all(
         },
         polarization: pol,
         max_order,
+        source: Source::PlaneWave,
     };
     let scattering = calculate_scattering(&scat_params);
 
