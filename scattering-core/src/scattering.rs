@@ -384,6 +384,59 @@ mod tests {
         );
     }
 
+    /// Canary for the hankel1 complex-argument NaN bug.
+    /// Uses the exact reproducer from project_hankel1_complex_bug.md:
+    ///   eps_r = 2.3 - 0.7i, mu_r = 1.4 + 0.3i, lambda = 1.2
+    /// which gives knr ≈ 4.853 - 0.205i, triggering NaN in hankel1.
+    #[test]
+    fn test_lossy_material_no_nan() {
+        let params = ScatteringParams {
+            wavelength: 1.2,
+            material: Material {
+                permittivity_real: 2.3,
+                permittivity_imag: -0.7,
+                permeability_real: 1.4,
+                permeability_imag: 0.3,
+            },
+            max_order: 5,
+            source: Source::new(SourceKind::PlaneWaveTM, RADIUS),
+        };
+
+        let result = calculate_scattering(&params);
+
+        // Every coefficient must be finite (not NaN or Inf)
+        for (i, bn) in result.scattering_coefficients.iter().enumerate() {
+            assert!(
+                bn.re.is_finite() && bn.im.is_finite(),
+                "b_n[{}] (order {}) is not finite: {}",
+                i,
+                result.orders[i],
+                bn
+            );
+        }
+        for (i, cn) in result.internal_coefficients.iter().enumerate() {
+            assert!(
+                cn.re.is_finite() && cn.im.is_finite(),
+                "c_n[{}] (order {}) is not finite: {}",
+                i,
+                result.orders[i],
+                cn
+            );
+        }
+
+        // Scattering must actually occur — not all zeros
+        let max_bn = result
+            .scattering_coefficients
+            .iter()
+            .map(|c| c.norm())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_bn > 1e-10,
+            "All scattering coefficients are ~zero; scattering didn't happen (max |b_n| = {:.2e})",
+            max_bn
+        );
+    }
+
     #[test]
     fn test_dipole_exy_interior_coefficients() {
         #[rustfmt::skip]

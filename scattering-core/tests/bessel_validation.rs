@@ -67,6 +67,7 @@ struct AccuracyReport {
     /// Key: (order, radius_bits) — radius_bits is f64::to_bits() for exact grouping
     errors_by_order_radius: BTreeMap<(i32, u64), GroupStats>,
     worst_cases: Vec<FailureDetail>,
+    nan_count: usize,
 }
 
 /// Parse a line in format: (order, radius, angle, re_result, im_result)
@@ -132,6 +133,7 @@ where
 
     let mut total_points = 0usize;
     let mut points_passing = 0usize;
+    let mut nan_count = 0usize;
     let mut max_relative_error = 0.0f64;
     let mut sum_relative_error = 0.0f64;
     let mut max_rel_error_point: Option<FailureDetail> = None;
@@ -161,6 +163,7 @@ where
 
         if !computed.re.is_finite() || !computed.im.is_finite() {
             total_points += 1;
+            nan_count += 1;
             let detail = FailureDetail {
                 order: point.order,
                 z: point.z,
@@ -235,6 +238,7 @@ where
         max_rel_error_point,
         errors_by_order_radius,
         worst_cases,
+        nan_count,
     }
 }
 
@@ -268,6 +272,7 @@ fn print_report(report: &AccuracyReport) {
     println!("  {} Validation Report", report.function_name);
     println!("{:=<60}", "");
     println!("Total points tested: {}", report.total_points);
+    println!("Non-finite (NaN/Inf) results: {}", report.nan_count);
     println!(
         "Points passing (rel_err < 1e-6): {} ({:.2}%)",
         report.points_passing,
@@ -376,7 +381,7 @@ fn get_sample_size() -> Option<usize> {
 /// Get the path to the artifacts directory.
 fn artifacts_path(filename: &str) -> String {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    format!("{}/artifacts/{}", manifest_dir, filename)
+    format!("{}/tests/truth_data/{}", manifest_dir, filename)
 }
 
 #[test]
@@ -391,6 +396,11 @@ fn validate_bessel_j_against_scipy() {
     let report = run_validation(&data_path, "Bessel J", bessel_j, sample_size);
     print_report(&report);
 
+    assert_eq!(
+        report.nan_count, 0,
+        "{}: {} of {} points returned NaN/Inf",
+        report.function_name, report.nan_count, report.total_points
+    );
     assert!(
         report.max_relative_error < 1e-6,
         "Max relative error {:.2e} exceeds threshold 1e-6",
@@ -410,6 +420,11 @@ fn validate_hankel1_against_scipy() {
     let report = run_validation(&data_path, "Hankel H1", hankel1, sample_size);
     print_report(&report);
 
+    assert_eq!(
+        report.nan_count, 0,
+        "{}: {} of {} points returned NaN/Inf",
+        report.function_name, report.nan_count, report.total_points
+    );
     assert!(
         report.max_relative_error < 1e-6,
         "Max relative error {:.2e} exceeds threshold 1e-6",
@@ -429,6 +444,11 @@ fn validate_bessel_k_against_scipy() {
     let report = run_validation(&data_path, "Bessel K", bessel_k, sample_size);
     print_report(&report);
 
+    assert_eq!(
+        report.nan_count, 0,
+        "{}: {} of {} points returned NaN/Inf",
+        report.function_name, report.nan_count, report.total_points
+    );
     assert!(
         report.max_relative_error < 1e-6,
         "Max relative error {:.2e} exceeds threshold 1e-6",
@@ -448,6 +468,106 @@ fn validate_bessel_i_against_scipy() {
     let report = run_validation(&data_path, "Bessel I", bessel_i, sample_size);
     print_report(&report);
 
+    assert_eq!(
+        report.nan_count, 0,
+        "{}: {} of {} points returned NaN/Inf",
+        report.function_name, report.nan_count, report.total_points
+    );
+    assert!(
+        report.max_relative_error < 1e-6,
+        "Max relative error {:.2e} exceeds threshold 1e-6",
+        report.max_relative_error
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Edge-case validation tests
+//
+// The main grid uses 20 evenly-spaced angles (~0.33 rad apart) and a logspace
+// of radii. This leaves blind spots near the real, imaginary, and negative-real
+// axes — exactly where our implementations switch code paths:
+//
+//   - Near θ=0/2π (real axis): hankel1 branches between J+iY (real z) and
+//     the K-path (complex z). The Miller recurrence in bessel_k can overflow
+//     for z with small imaginary part (the bug that motivated these tests).
+//
+//   - Near θ=π/2 and 3π/2 (imaginary axis): hankel1_via_k computes w = -iz,
+//     so z near the imaginary axis maps w near the real axis — the RHP/LHP
+//     (ZBKNU vs ZACON) branch boundary in bessel_k.
+//
+//   - Near θ=π (negative real axis): bessel_j applies the reflection
+//     J_n(-z) = (-1)^n J_n(z), and bessel_k hits the ZACON analytic
+//     continuation branch cut.
+//
+//   - Near |z|=2: bessel_k switches from power series to Miller backward
+//     recurrence. Radii straddling this boundary catch handoff discontinuities.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_bessel_j_edge_cases() {
+    let data_path = artifacts_path("bessel_j_edge_cases.txt");
+    let report = run_validation(&data_path, "Bessel J (edge)", bessel_j, None);
+    print_report(&report);
+
+    assert_eq!(
+        report.nan_count, 0,
+        "{}: {} of {} points returned NaN/Inf",
+        report.function_name, report.nan_count, report.total_points
+    );
+    assert!(
+        report.max_relative_error < 1e-6,
+        "Max relative error {:.2e} exceeds threshold 1e-6",
+        report.max_relative_error
+    );
+}
+
+#[test]
+fn validate_hankel1_edge_cases() {
+    let data_path = artifacts_path("hankel1_edge_cases.txt");
+    let report = run_validation(&data_path, "Hankel H1 (edge)", hankel1, None);
+    print_report(&report);
+
+    assert_eq!(
+        report.nan_count, 0,
+        "{}: {} of {} points returned NaN/Inf",
+        report.function_name, report.nan_count, report.total_points
+    );
+    assert!(
+        report.max_relative_error < 1e-6,
+        "Max relative error {:.2e} exceeds threshold 1e-6",
+        report.max_relative_error
+    );
+}
+
+#[test]
+fn validate_bessel_k_edge_cases() {
+    let data_path = artifacts_path("bessel_k_edge_cases.txt");
+    let report = run_validation(&data_path, "Bessel K (edge)", bessel_k, None);
+    print_report(&report);
+
+    assert_eq!(
+        report.nan_count, 0,
+        "{}: {} of {} points returned NaN/Inf",
+        report.function_name, report.nan_count, report.total_points
+    );
+    assert!(
+        report.max_relative_error < 1e-6,
+        "Max relative error {:.2e} exceeds threshold 1e-6",
+        report.max_relative_error
+    );
+}
+
+#[test]
+fn validate_bessel_i_edge_cases() {
+    let data_path = artifacts_path("bessel_i_edge_cases.txt");
+    let report = run_validation(&data_path, "Bessel I (edge)", bessel_i, None);
+    print_report(&report);
+
+    assert_eq!(
+        report.nan_count, 0,
+        "{}: {} of {} points returned NaN/Inf",
+        report.function_name, report.nan_count, report.total_points
+    );
     assert!(
         report.max_relative_error < 1e-6,
         "Max relative error {:.2e} exceeds threshold 1e-6",

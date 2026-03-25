@@ -429,8 +429,18 @@ fn bessel_k01_miller(z: Complex64) -> (Complex64, Complex64) {
         let cb = (Complex64::new(fk, 0.0) + z) * rak; // (fk + z) * 2/(fk+1)
 
         let p2_new = (cb * p2 - p1) * ak;
-        p1 = p2;
-        p2 = p2_new;
+
+        // Rescale to prevent overflow (matches bessel_j_miller strategy)
+        let mag = p2_new.norm();
+        if mag > 1e100 {
+            let inv_mag = 1.0 / mag;
+            p1 = p2 * inv_mag;
+            p2 = p2_new * inv_mag;
+            cs *= inv_mag;
+        } else {
+            p1 = p2;
+            p2 = p2_new;
+        }
         cs += p2;
 
         fks = a1 - fk + 1.0; // (fk-1)²
@@ -745,6 +755,23 @@ mod tests {
 
     fn approx_eq(a: Complex64, b: Complex64, tol: f64) -> bool {
         (a - b).norm() < tol
+    }
+
+    #[test]
+    fn test_k_complex_arg_no_nan() {
+        // Reproducer: K(0, 0.205+4.853i) overflows in Miller recurrence
+        let z = Complex64::new(0.205, 4.853);
+        let result = bessel_k(0, z);
+        assert!(
+            result.re.is_finite() && result.im.is_finite(),
+            "K(0, {z}) returned {result}"
+        );
+        // SciPy reference: K(0, 0.205+4.853i) = 0.35577 + 0.29417i
+        let expected = Complex64::new(0.3557733657615855, 0.2941732531083401);
+        assert!(
+            approx_eq(result, expected, 1e-6),
+            "K(0, {z}) = {result}, expected {expected}"
+        );
     }
 
     #[test]
