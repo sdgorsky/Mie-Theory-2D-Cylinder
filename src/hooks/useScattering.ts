@@ -55,6 +55,13 @@ export interface UseScatteringResult {
   setViewSize: (viewSize: number) => void;
 }
 
+const SOURCE_TYPE_MAP: Record<string, number> = {
+  planewave_tm: 0,
+  planewave_te: 1,
+  dipole_ez: 2,
+  dipole_exy: 3,
+};
+
 function toComputeParams(p: ScatteringParams, viewSize: number): ComputeParams {
   return {
     wavelength: p.wavelength,
@@ -62,7 +69,10 @@ function toComputeParams(p: ScatteringParams, viewSize: number): ComputeParams {
     permittivityIm: p.material.permittivity.im,
     permeabilityRe: p.material.permeability.re,
     permeabilityIm: p.material.permeability.im,
-    polarization: p.polarization === "TM" ? 0 : 1,
+    sourceType: SOURCE_TYPE_MAP[p.sourceType] ?? 0,
+    dipoleXs: p.dipole.xs,
+    dipoleYs: p.dipole.ys,
+    dipoleAlpha: p.dipole.alpha,
     maxOrder: p.maxOrder,
     viewSize,
   };

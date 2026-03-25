@@ -258,6 +258,14 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
     let mut exp_table = vec![Complex64::new(0.0, 0.0); n_coeffs];
 
     let source = params.source;
+    let source_interior = source.is_interior();
+
+    // Source wavenumber: k0 for exterior sources, k1 for interior sources
+    let k_source = if source_interior {
+        k1
+    } else {
+        Complex64::new(k0, 0.0)
+    };
 
     for iy in 0..GRID_SIZE {
         let y = y_max - (iy as f64 + 0.5) * dx;
@@ -278,12 +286,22 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
             let idx = row_offset + ix;
 
             let field = if r < RADIUS {
-                compute_interior_field_spline(&c_n, &bessel_splines, r, &exp_table)
+                // Interior: c_n expansion + incident field if source is interior
+                let modal = compute_interior_field_spline(&c_n, &bessel_splines, r, &exp_table);
+                if source_interior {
+                    modal + compute_incident_field(source, k_source, x, y)
+                } else {
+                    modal
+                }
             } else {
-                let incident = compute_incident_field(source, k0, x, y);
+                // Exterior: b_n expansion + incident field if source is exterior
                 let scattered =
                     compute_scattered_field_spline(&b_n, &hankel_splines, r, &exp_table);
-                incident + scattered
+                if source_interior {
+                    scattered
+                } else {
+                    scattered + compute_incident_field(source, k_source, x, y)
+                }
             };
 
             field_real[idx] = field.re;
@@ -430,12 +448,11 @@ mod tests {
     }
 
     use crate::scattering::{
-        calculate_scattering, Material, Polarization, ScatteringParams, PERMEABILITY_IM_MAX,
-        PERMEABILITY_IM_MIN, PERMEABILITY_RE_MAX, PERMEABILITY_RE_MIN, PERMITTIVITY_IM_MAX,
-        PERMITTIVITY_IM_MIN, PERMITTIVITY_RE_MAX, PERMITTIVITY_RE_MIN, WAVELENGTH_MAX,
-        WAVELENGTH_MIN,
+        calculate_scattering, Material, ScatteringParams, PERMEABILITY_IM_MAX, PERMEABILITY_IM_MIN,
+        PERMEABILITY_RE_MAX, PERMEABILITY_RE_MIN, PERMITTIVITY_IM_MAX, PERMITTIVITY_IM_MIN,
+        PERMITTIVITY_RE_MAX, PERMITTIVITY_RE_MIN, WAVELENGTH_MAX, WAVELENGTH_MIN,
     };
-    use crate::sources::Source;
+    use crate::sources::{Source, SourceKind};
 
     /// Sweep permittivity, permeability, and wavelength to verify the boundary
     /// condition: interior and exterior fields must match at the cylinder surface.
@@ -477,9 +494,8 @@ mod tests {
                                     permeability_real: mu_re,
                                     permeability_imag: mu_im,
                                 },
-                                polarization: Polarization::TM,
                                 max_order,
-                                source: Source::PlaneWave,
+                                source: Source::new(SourceKind::PlaneWaveTM, RADIUS),
                             };
 
                             let result = calculate_scattering(&params);
@@ -574,9 +590,8 @@ mod tests {
                                     permeability_real: mu_re,
                                     permeability_imag: mu_im,
                                 },
-                                polarization: Polarization::TE,
                                 max_order,
-                                source: Source::PlaneWave,
+                                source: Source::new(SourceKind::PlaneWaveTE, RADIUS),
                             };
 
                             let result = calculate_scattering(&params);
@@ -644,9 +659,8 @@ mod tests {
                 permeability_real: 1.0,
                 permeability_imag: -0.2,
             },
-            polarization: Polarization::TM,
             max_order: 10,
-            source: Source::PlaneWave,
+            source: Source::new(SourceKind::PlaneWaveTM, RADIUS),
         };
 
         let scattering = calculate_scattering(&params);
@@ -680,7 +694,7 @@ mod tests {
                 .collect(),
             orders: scattering.orders,
             view_size: 5.0_f64,
-            source: Source::PlaneWave,
+            source: Source::new(SourceKind::PlaneWaveTM, RADIUS),
         };
 
         let result = compute_field(&field_params);
@@ -701,5 +715,162 @@ mod tests {
             "Field maximum should be significant, got {}",
             max_mag
         );
+    }
+
+    use crate::sources::{compute_incident_field, Domain};
+
+    /// Generalized exterior total field at (r, theta) for any source.
+    /// Total = incident (if exterior source) + scattered modal sum.
+    fn compute_total_exterior_field(
+        b_n: &[Complex64],
+        orders: &[i32],
+        k0: f64,
+        r: f64,
+        theta: f64,
+        source: Source,
+    ) -> Complex64 {
+        let k0_r = Complex64::new(k0 * r, 0.0);
+
+        let mut scattered = Complex64::new(0.0, 0.0);
+        for (i, &n) in orders.iter().enumerate() {
+            let hn = hankel1(n, k0_r);
+            let n_theta = n as f64 * theta;
+            let exp_intheta = Complex64::new(n_theta.cos(), n_theta.sin());
+            scattered += b_n[i] * hn * exp_intheta;
+        }
+
+        let incident = if source.domain == Domain::Exterior {
+            let x = r * theta.cos();
+            let y = r * theta.sin();
+            compute_incident_field(source, Complex64::new(k0, 0.0), x, y)
+        } else {
+            Complex64::new(0.0, 0.0)
+        };
+
+        incident + scattered
+    }
+
+    /// Generalized interior total field at (r, theta) for any source.
+    /// Total = incident (if interior source) + internal modal sum.
+    fn compute_total_interior_field(
+        c_n: &[Complex64],
+        orders: &[i32],
+        k1: Complex64,
+        r: f64,
+        theta: f64,
+        source: Source,
+    ) -> Complex64 {
+        let k1_r = k1 * r;
+        let mut modal = Complex64::new(0.0, 0.0);
+
+        for (i, &n) in orders.iter().enumerate() {
+            let jn = bessel_j(n, k1_r);
+            let n_theta = n as f64 * theta;
+            let exp_intheta = Complex64::new(n_theta.cos(), n_theta.sin());
+            modal += c_n[i] * jn * exp_intheta;
+        }
+
+        let incident = if source.domain == Domain::Interior {
+            let x = r * theta.cos();
+            let y = r * theta.sin();
+            compute_incident_field(source, k1, x, y)
+        } else {
+            Complex64::new(0.0, 0.0)
+        };
+
+        incident + modal
+    }
+
+    /// Verify boundary condition (interior == exterior at r = RADIUS) for
+    /// four dipole configurations with a single non-trivial material.
+    #[test]
+    fn test_dipole_boundary_conditions() {
+        // Real dielectric+magnetic material — avoids complex Bessel arguments
+        // where our hankel1 implementation has a known bug (NaN for |Im(z)| > ~0.01).
+        let material = Material {
+            permittivity_real: 2.3,
+            permittivity_imag: 0.0,
+            permeability_real: 1.4,
+            permeability_imag: 0.0,
+        };
+        let wavelength = 1.2;
+        let max_order = 25;
+        let theta_vec = linspace(0.0, 2.0 * PI, 40);
+        let tol = 1e-5;
+
+        let k0 = 2.0 * PI / wavelength;
+        let kn = Complex64::new(k0, 0.0) * material.refractive_index();
+
+        // Four dipole configurations: (label, SourceKind)
+        let configs: Vec<(&str, SourceKind)> = vec![
+            (
+                "DipoleEz exterior",
+                SourceKind::DipoleEz { xs: 1.7, ys: -0.9 },
+            ),
+            (
+                "DipoleEz interior",
+                SourceKind::DipoleEz { xs: 0.15, ys: -0.1 },
+            ),
+            (
+                "DipoleExy exterior",
+                SourceKind::DipoleExy {
+                    xs: -1.3,
+                    ys: 0.6,
+                    alpha: 0.73,
+                },
+            ),
+            (
+                "DipoleExy interior",
+                SourceKind::DipoleExy {
+                    xs: -0.12,
+                    ys: 0.2,
+                    alpha: -1.1,
+                },
+            ),
+        ];
+
+        for (label, kind) in &configs {
+            let source = Source::new(*kind, RADIUS);
+
+            let params = ScatteringParams {
+                wavelength,
+                material,
+                max_order,
+                source,
+            };
+
+            let result = calculate_scattering(&params);
+
+            let mut max_diff = 0.0_f64;
+            let mut worst_theta = 0.0_f64;
+            for &theta in &theta_vec {
+                let ext = compute_total_exterior_field(
+                    &result.scattering_coefficients,
+                    &result.orders,
+                    k0,
+                    RADIUS,
+                    theta,
+                    source,
+                );
+                let int = compute_total_interior_field(
+                    &result.internal_coefficients,
+                    &result.orders,
+                    kn,
+                    RADIUS,
+                    theta,
+                    source,
+                );
+                let diff = (int - ext).norm();
+                if diff > max_diff {
+                    max_diff = diff;
+                    worst_theta = theta;
+                }
+            }
+
+            assert!(
+                max_diff < tol,
+                "{label}: boundary condition violated, max error = {max_diff:.4e} at theta = {worst_theta:.3}"
+            );
+        }
     }
 }

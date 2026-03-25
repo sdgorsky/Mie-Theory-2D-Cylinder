@@ -1,24 +1,126 @@
-import { useState, memo } from "react";
+import { useState, useRef, useEffect, memo } from "react";
+import type { JSX } from "react";
 import type {
   ScatteringParams,
   ComplexObj,
-  Polarization,
+  SourceType,
+  DipoleParams,
 } from "../types/cylinder";
-import { createDefaultParams } from "../types/cylinder";
+import { createDefaultParams, isDipoleSource } from "../types/cylinder";
 import type { ParameterBounds } from "../hooks/useScattering";
 import { ComplexPlane } from "./ComplexPlane";
 import "./CylinderControls.css";
+
+const SOURCE_OPTIONS: { value: SourceType; label: JSX.Element }[] = [
+  {
+    value: "planewave_tm",
+    label: (
+      <span>
+        Plane Wave TM (E<sub>z</sub>)
+      </span>
+    ),
+  },
+  {
+    value: "planewave_te",
+    label: (
+      <span>
+        Plane Wave TE (H<sub>z</sub>)
+      </span>
+    ),
+  },
+  {
+    value: "dipole_ez",
+    label: (
+      <span>
+        Dipole E<sub>z</sub>
+      </span>
+    ),
+  },
+  {
+    value: "dipole_exy",
+    label: (
+      <span>
+        Dipole E<sub>xy</sub>
+      </span>
+    ),
+  },
+];
+
+export type DipoleUpdateFn = (dipole: DipoleParams) => void;
 
 interface CylinderControlsProps {
   onChange: (params: ScatteringParams) => void;
   onShowOverlayChange: (show: boolean) => void;
   bounds: ParameterBounds | null;
+  /** Ref that CylinderControls populates with its updateDipole function,
+   *  allowing FieldVisualization to route drag updates through CylinderControls' state. */
+  dipoleUpdateRef: React.RefObject<DipoleUpdateFn | null>;
+}
+
+function SourceDropdown({
+  value,
+  onChange,
+}: {
+  value: SourceType;
+  onChange: (v: SourceType) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const selected = SOURCE_OPTIONS.find((o) => o.value === value)!;
+
+  return (
+    <div className="control-section">
+      <label className="section-label">Source</label>
+      <div className="source-dropdown" ref={ref}>
+        <button
+          className="source-dropdown-trigger"
+          onClick={() => setOpen(!open)}
+        >
+          {selected.label}
+          <span className="source-dropdown-arrow">{open ? "▴" : "▾"}</span>
+        </button>
+        {open && (
+          <div className="source-dropdown-menu">
+            {SOURCE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={
+                  "source-dropdown-item" +
+                  (opt.value === value ? " active" : "")
+                }
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export const CylinderControls = memo(function CylinderControls({
   onChange,
   onShowOverlayChange,
   bounds,
+  dipoleUpdateRef,
 }: CylinderControlsProps) {
   const [showOverlay, setShowOverlay] = useState(true);
   // CylinderControls owns its state — no params prop means React.memo blocks
@@ -34,9 +136,18 @@ export const CylinderControls = memo(function CylinderControls({
     update({ ...local, wavelength });
   };
 
-  const updatePolarization = (polarization: Polarization) => {
-    update({ ...local, polarization });
+  const updateSourceType = (sourceType: SourceType) => {
+    update({ ...local, sourceType });
   };
+
+  const updateDipole = (dipole: DipoleParams) => {
+    update({ ...local, dipole });
+  };
+
+  // Expose updateDipole so FieldVisualization drag routes through our state
+  useEffect(() => {
+    dipoleUpdateRef.current = updateDipole;
+  });
 
   const updateMaxOrder = (maxOrder: number) => {
     update({ ...local, maxOrder });
@@ -66,6 +177,8 @@ export const CylinderControls = memo(function CylinderControls({
     );
   }
 
+  const showDipole = isDipoleSource(local.sourceType);
+
   return (
     <div className="cylinder-controls">
       <div className="controls-header">
@@ -73,29 +186,70 @@ export const CylinderControls = memo(function CylinderControls({
         <button
           className="reset-button"
           title="Reset simulation to default settings"
-          onClick={() => update(createDefaultParams())}
+          onClick={() =>
+            update({ ...createDefaultParams(), dipole: local.dipole })
+          }
         >
           ↻
         </button>
       </div>
 
-      <div className="control-section">
-        <label className="section-label">Polarization</label>
-        <div className="polarization-buttons">
-          <button
-            className={local.polarization === "TM" ? "active" : ""}
-            onClick={() => updatePolarization("TM")}
-          >
-            TM (E∥z)
-          </button>
-          <button
-            className={local.polarization === "TE" ? "active" : ""}
-            onClick={() => updatePolarization("TE")}
-          >
-            TE (H∥z)
-          </button>
+      <SourceDropdown value={local.sourceType} onChange={updateSourceType} />
+
+      {showDipole && (
+        <div className="control-section dipole-section">
+          <label className="section-label">Dipole Position</label>
+          <div className="dipole-coords">
+            <label>
+              x₀
+              <input
+                type="number"
+                step={0.1}
+                value={local.dipole.xs.toFixed(2)}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val)) updateDipole({ ...local.dipole, xs: val });
+                }}
+              />
+            </label>
+            <label>
+              y₀
+              <input
+                type="number"
+                step={0.1}
+                value={local.dipole.ys.toFixed(2)}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val)) updateDipole({ ...local.dipole, ys: val });
+                }}
+              />
+            </label>
+          </div>
+          {local.sourceType === "dipole_exy" && (
+            <div className="dipole-orientation">
+              <label>
+                α
+                <input
+                  type="range"
+                  min={-Math.PI}
+                  max={Math.PI}
+                  step={0.01}
+                  value={local.dipole.alpha}
+                  onChange={(e) =>
+                    updateDipole({
+                      ...local.dipole,
+                      alpha: parseFloat(e.target.value),
+                    })
+                  }
+                />
+                <span className="alpha-display">
+                  {((local.dipole.alpha * 180) / Math.PI).toFixed(0)}°
+                </span>
+              </label>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       <div className="control-section">
         <label className="section-label">Wavelength (λ / d)</label>

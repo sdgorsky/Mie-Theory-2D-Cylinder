@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { CylinderControls } from "./components/CylinderControls";
 import { FieldVisualization } from "./components/FieldVisualization";
 import { useScattering } from "./hooks/useScattering";
@@ -6,6 +6,7 @@ import {
   createDefaultParams,
   calculateRefractiveIndex,
   formatComplex,
+  getPolarization,
 } from "./types/cylinder";
 import type { ScatteringParams } from "./types/cylinder";
 import "./App.css";
@@ -27,6 +28,9 @@ function App() {
   } = useScattering();
 
   const [showOverlay, setShowOverlay] = useState(true);
+  const dipoleUpdateRef = useRef<
+    ((d: import("./types/cylinder").DipoleParams) => void) | null
+  >(null);
 
   // Called on every slider event — non-blocking, posts to worker.
   // No setState here: CylinderControls owns its own display state,
@@ -65,10 +69,13 @@ function App() {
             paintRef={paintRef}
             imageStats={imageStats}
             hasImage={hasImage}
-            polarization={displayParams.polarization}
+            polarization={getPolarization(displayParams.sourceType)}
+            sourceType={displayParams.sourceType}
+            dipole={displayParams.dipole}
             showOverlay={showOverlay}
             onModeChange={recolor}
             onZoomChange={setViewSize}
+            dipoleUpdateRef={dipoleUpdateRef}
             width={512}
             height={512}
           />
@@ -111,6 +118,7 @@ function App() {
             onChange={handleParamsChange}
             onShowOverlayChange={setShowOverlay}
             bounds={parameterBounds}
+            dipoleUpdateRef={dipoleUpdateRef}
           />
         </div>
       </main>

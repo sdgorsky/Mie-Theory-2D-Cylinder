@@ -14,7 +14,10 @@ export interface ComputeParams {
   permittivityIm: number;
   permeabilityRe: number;
   permeabilityIm: number;
-  polarization: number; // 0 = TM, 1 = TE (integer avoids string encoding in WASM)
+  sourceType: number; // 0=PlaneWave TM, 1=PlaneWave TE, 2=DipoleEz, 3=DipoleExy
+  dipoleXs: number;
+  dipoleYs: number;
+  dipoleAlpha: number;
   maxOrder: number;
   viewSize: number;
 }
@@ -84,6 +87,9 @@ let reusableValues: Float64Array | null = null;
 
 // RGBA buffer recycled from main thread (ping-pong)
 let recycledRgbaBuffer: ArrayBuffer | null = null;
+
+// Cached compute params — needed by recolor for dipole exclusion zone
+let cachedComputeParams: ComputeParams | null = null;
 
 function recycleBuffer(buf: ArrayBuffer | undefined) {
   if (buf && buf.byteLength > 0) {
@@ -174,11 +180,15 @@ function getDivergingColor(t: number): [number, number, number] {
 
 // ── Render field to RGBA ─────────────────────────────────────────────
 
+/** Physical exclusion radius around dipole (in world units). */
+const DIPOLE_EXCLUSION_RADIUS = 0.15;
+
 function renderFieldToRGBA(
   fieldReal: Float64Array,
   fieldImag: Float64Array,
   gridSize: number,
   mode: VisualizationMode,
+  params: ComputeParams | null,
 ): { imageData: Uint8ClampedArray; stats: ImageStats } {
   const n = gridSize * gridSize;
 
@@ -187,6 +197,20 @@ function renderFieldToRGBA(
     reusableValues = new Float64Array(n);
   }
   const values = reusableValues;
+
+  // Dipole exclusion zone: skip pixels near source when computing min/max
+  const isDipole = params != null && params.sourceType >= 2;
+  let exclIx = -1;
+  let exclIy = -1;
+  let exclR2 = 0; // exclusion radius squared, in pixel units
+  if (isDipole && params != null) {
+    const vs = params.viewSize;
+    const pxPerUnit = gridSize / vs;
+    exclIx = Math.round((params.dipoleXs / vs + 0.5) * gridSize);
+    exclIy = Math.round((0.5 - params.dipoleYs / vs) * gridSize);
+    const rPx = DIPOLE_EXCLUSION_RADIUS * pxPerUnit;
+    exclR2 = rPx * rPx;
+  }
 
   let minVal = Infinity;
   let maxVal = -Infinity;
@@ -212,6 +236,14 @@ function renderFieldToRGBA(
     }
     values[i] = val;
     if (mode !== "phase") {
+      // Skip pixels near dipole source for range calculation
+      if (isDipole) {
+        const px = i % gridSize;
+        const py = (i / gridSize) | 0;
+        const ddx = px - exclIx;
+        const ddy = py - exclIy;
+        if (ddx * ddx + ddy * ddy < exclR2) continue;
+      }
       if (val < minVal) minVal = val;
       if (val > maxVal) maxVal = val;
     }
@@ -303,6 +335,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     recycleBuffer(msg.recycledBuffer);
     try {
       const p = msg.params;
+      cachedComputeParams = p;
 
       // Single WASM call — void return, no JS objects created
       compute_all(
@@ -311,7 +344,10 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         p.permittivityIm,
         p.permeabilityRe,
         p.permeabilityIm,
-        p.polarization,
+        p.sourceType,
+        p.dipoleXs,
+        p.dipoleYs,
+        p.dipoleAlpha,
         p.maxOrder,
         p.viewSize,
         fieldRealBuf!,
@@ -324,6 +360,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         fieldImagBuf!,
         cachedGridSize,
         msg.mode,
+        p,
       );
 
       // Order metadata derived from input — no WASM return needed
@@ -363,6 +400,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         fieldImagBuf,
         cachedGridSize,
         msg.mode,
+        cachedComputeParams,
       );
 
       const response: WorkerResponse = {

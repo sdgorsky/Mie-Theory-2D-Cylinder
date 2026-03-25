@@ -18,9 +18,46 @@ export interface MaterialProperties {
 }
 
 /**
- * Polarization of the incident electromagnetic wave.
+ * Polarization of the electromagnetic field.
  */
 export type Polarization = "TM" | "TE";
+
+/**
+ * Combined source + polarization selection.
+ * Each option implies a specific polarization:
+ *   planewave_tm / dipole_ez → TM (Ez is the scalar field)
+ *   planewave_te / dipole_exy → TE (Hz is the scalar field)
+ */
+export type SourceType =
+  | "planewave_tm"
+  | "planewave_te"
+  | "dipole_ez"
+  | "dipole_exy";
+
+/** Dipole source position and orientation. */
+export interface DipoleParams {
+  xs: number;
+  ys: number;
+  /** Orientation angle in radians (only used for dipole_exy). */
+  alpha: number;
+}
+
+/** Derive polarization from source type. */
+export function getPolarization(sourceType: SourceType): Polarization {
+  switch (sourceType) {
+    case "planewave_tm":
+    case "dipole_ez":
+      return "TM";
+    case "planewave_te":
+    case "dipole_exy":
+      return "TE";
+  }
+}
+
+/** Whether the source type is a dipole. */
+export function isDipoleSource(sourceType: SourceType): boolean {
+  return sourceType === "dipole_ez" || sourceType === "dipole_exy";
+}
 
 /**
  * Complete specification for 2D electromagnetic scattering simulation.
@@ -31,8 +68,10 @@ export interface ScatteringParams {
   wavelength: number;
   /** Material properties of the cylinder */
   material: MaterialProperties;
-  /** Polarization of incident wave (TM or TE) */
-  polarization: Polarization;
+  /** Source type (determines both source and polarization) */
+  sourceType: SourceType;
+  /** Dipole position and orientation (ignored for plane wave sources) */
+  dipole: DipoleParams;
   /** Maximum Bessel order for the expansion (computes -N to +N) */
   maxOrder: number;
 }
@@ -47,7 +86,8 @@ export function createDefaultParams(): ScatteringParams {
       permittivity: { re: 4.0, im: 0.0 },
       permeability: { re: 1.0, im: 0.0 },
     },
-    polarization: "TM",
+    sourceType: "planewave_tm",
+    dipole: { xs: 1.5, ys: 0.0, alpha: 0.0 },
     maxOrder: 21,
   };
 }
