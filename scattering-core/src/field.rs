@@ -168,6 +168,8 @@ pub struct FieldParams {
     pub orders: Vec<i32>,
     /// View size in cylinder diameters (physical extent of the grid)
     pub view_size: f64,
+    /// Grid resolution (number of points per edge). Defaults to GRID_SIZE.
+    pub grid_size: usize,
     /// Incident field source type
     pub source: Source,
 }
@@ -220,13 +222,14 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
     let k1 = k0 * m;
 
     // Grid setup
+    let grid_size = params.grid_size;
     let view_size = params.view_size;
     let half_size = view_size / 2.0;
     let x_min = -half_size;
     let x_max = half_size;
     let y_min = -half_size;
     let y_max = half_size;
-    let dx = view_size / (GRID_SIZE as f64);
+    let dx = view_size / (grid_size as f64);
 
     // ===== PHASE 1: Build splines for Bessel functions =====
 
@@ -250,7 +253,7 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
 
     // ===== PHASE 2: Compute field on full grid =====
 
-    let total_points = GRID_SIZE * GRID_SIZE;
+    let total_points = grid_size * grid_size;
     let mut field_real = vec![0.0; total_points];
     let mut field_imag = vec![0.0; total_points];
 
@@ -267,11 +270,11 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
         Complex64::new(k0, 0.0)
     };
 
-    for iy in 0..GRID_SIZE {
+    for iy in 0..grid_size {
         let y = y_max - (iy as f64 + 0.5) * dx;
-        let row_offset = iy * GRID_SIZE;
+        let row_offset = iy * grid_size;
 
-        for ix in 0..GRID_SIZE {
+        for ix in 0..grid_size {
             let x = x_min + (ix as f64 + 0.5) * dx;
             let r = (x * x + y * y).sqrt();
 
@@ -312,7 +315,7 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
     FieldResult {
         field_real,
         field_imag,
-        grid_size: GRID_SIZE,
+        grid_size,
         view_size,
         x_min,
         x_max,
@@ -694,6 +697,7 @@ mod tests {
                 .collect(),
             orders: scattering.orders,
             view_size: 5.0_f64,
+            grid_size: GRID_SIZE,
             source: Source::new(SourceKind::PlaneWaveTM, RADIUS),
         };
 

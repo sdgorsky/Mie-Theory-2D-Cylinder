@@ -176,6 +176,7 @@ pub fn compute_all(
         internal_coeffs_imag: int_im,
         orders: scattering.orders,
         view_size,
+        grid_size: GRID_SIZE,
         source,
     };
 
