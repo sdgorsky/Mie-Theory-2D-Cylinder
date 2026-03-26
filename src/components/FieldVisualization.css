@@ -43,6 +43,10 @@
   width: calc(100% / 4 - 2px);
 }
 
+.pill-highlight-5 {
+  width: calc(100% / 5 - 2px);
+}
+
 .mode-pill button {
   position: relative;
   z-index: 1;

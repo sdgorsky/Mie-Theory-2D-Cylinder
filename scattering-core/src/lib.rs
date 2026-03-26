@@ -2,7 +2,7 @@ pub mod bessel;
 pub mod field;
 pub mod scattering;
 pub mod sources;
-use field::{compute_field, FieldParams, DEFAULT_VIEW_SIZE, GRID_SIZE};
+use field::{compute_field, FieldParams, ModalSplineCache, DEFAULT_VIEW_SIZE, GRID_SIZE};
 use scattering::{
     calculate_scattering, Material, ScatteringParams, MAX_ORDER_MAX, MAX_ORDER_MIN,
     PERMEABILITY_IM_MAX, PERMEABILITY_IM_MIN, PERMEABILITY_RE_MAX, PERMEABILITY_RE_MIN,
@@ -90,9 +90,95 @@ pub fn get_parameter_bounds() -> JsValue {
     obj.into()
 }
 
-/// Combined scattering + field computation that writes directly into
-/// pre-allocated JS Float64Arrays. Zero per-frame JS heap allocations:
-/// no return object, no string params, just two Float64Array.set() calls.
+/// Full pipeline: scattering coefficients + field computation.
+/// Callable from native code (benchmarks, tests) without JS dependencies.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_all_native(
+    wavelength: f64,
+    permittivity_real: f64,
+    permittivity_imag: f64,
+    permeability_real: f64,
+    permeability_imag: f64,
+    source: Source,
+    max_order: i32,
+    view_size: f64,
+    grid_size: usize,
+) -> field::FieldResult {
+    compute_all_native_cached(
+        wavelength,
+        permittivity_real,
+        permittivity_imag,
+        permeability_real,
+        permeability_imag,
+        source,
+        max_order,
+        view_size,
+        grid_size,
+        &mut None,
+    )
+}
+
+/// Full pipeline with spline cache for reuse across frames.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_all_native_cached(
+    wavelength: f64,
+    permittivity_real: f64,
+    permittivity_imag: f64,
+    permeability_real: f64,
+    permeability_imag: f64,
+    source: Source,
+    max_order: i32,
+    view_size: f64,
+    grid_size: usize,
+    spline_cache: &mut Option<ModalSplineCache>,
+) -> field::FieldResult {
+    let scat_params = ScatteringParams {
+        wavelength,
+        material: Material {
+            permittivity_real,
+            permittivity_imag,
+            permeability_real,
+            permeability_imag,
+        },
+        max_order,
+        source,
+    };
+    let scattering = calculate_scattering(&scat_params);
+
+    let n_coeffs = scattering.orders.len();
+    let mut scat_re = Vec::with_capacity(n_coeffs);
+    let mut scat_im = Vec::with_capacity(n_coeffs);
+    let mut int_re = Vec::with_capacity(n_coeffs);
+    let mut int_im = Vec::with_capacity(n_coeffs);
+
+    for i in 0..n_coeffs {
+        scat_re.push(scattering.scattering_coefficients[i].re);
+        scat_im.push(scattering.scattering_coefficients[i].im);
+        int_re.push(scattering.internal_coefficients[i].re);
+        int_im.push(scattering.internal_coefficients[i].im);
+    }
+
+    let field_params = FieldParams {
+        wavelength,
+        permittivity_real,
+        permittivity_imag,
+        permeability_real,
+        permeability_imag,
+        scattering_coeffs_real: scat_re,
+        scattering_coeffs_imag: scat_im,
+        internal_coeffs_real: int_re,
+        internal_coeffs_imag: int_im,
+        orders: scattering.orders,
+        view_size,
+        grid_size,
+        source,
+    };
+
+    compute_field(&field_params, spline_cache)
+}
+
+/// WASM wrapper around `compute_all_native` that writes into pre-allocated
+/// JS Float64Arrays. Zero per-frame JS heap allocations.
 ///
 /// # Arguments
 /// * `wavelength` - Wavelength in units where cylinder diameter = 1
@@ -137,52 +223,30 @@ pub fn compute_all(
     };
     let source = Source::new(source_kind, RADIUS);
 
-    let scat_params = ScatteringParams {
-        wavelength,
-        material: Material {
+    // Persistent spline cache — survives across WASM calls.
+    // Modal splines are only rebuilt when material/wavelength/order change,
+    // not on every dipole position update.
+    thread_local! {
+        static SPLINE_CACHE: std::cell::RefCell<Option<ModalSplineCache>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    let field = SPLINE_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        compute_all_native_cached(
+            wavelength,
             permittivity_real,
             permittivity_imag,
             permeability_real,
             permeability_imag,
-        },
-        max_order,
-        source,
-    };
-    let scattering = calculate_scattering(&scat_params);
+            source,
+            max_order,
+            view_size,
+            GRID_SIZE,
+            &mut cache,
+        )
+    });
 
-    // Decompose Complex64 -> real/imag for FieldParams (stays on WASM heap)
-    let n_coeffs = scattering.orders.len();
-    let mut scat_re = Vec::with_capacity(n_coeffs);
-    let mut scat_im = Vec::with_capacity(n_coeffs);
-    let mut int_re = Vec::with_capacity(n_coeffs);
-    let mut int_im = Vec::with_capacity(n_coeffs);
-
-    for i in 0..n_coeffs {
-        scat_re.push(scattering.scattering_coefficients[i].re);
-        scat_im.push(scattering.scattering_coefficients[i].im);
-        int_re.push(scattering.internal_coefficients[i].re);
-        int_im.push(scattering.internal_coefficients[i].im);
-    }
-
-    let field_params = FieldParams {
-        wavelength,
-        permittivity_real,
-        permittivity_imag,
-        permeability_real,
-        permeability_imag,
-        scattering_coeffs_real: scat_re,
-        scattering_coeffs_imag: scat_im,
-        internal_coeffs_real: int_re,
-        internal_coeffs_imag: int_im,
-        orders: scattering.orders,
-        view_size,
-        grid_size: GRID_SIZE,
-        source,
-    };
-
-    let field = compute_field(&field_params);
-
-    // Copy into pre-allocated JS arrays — only JS-side cost is 2 Float64Array.set() calls
     out_field_real.copy_from(&field.field_real);
     out_field_imag.copy_from(&field.field_imag);
 }

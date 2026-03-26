@@ -6,7 +6,12 @@ import init, {
 
 // ── Types ────────────────────────────────────────────────────────────
 
-export type VisualizationMode = "magnitude" | "real" | "imag" | "phase";
+export type VisualizationMode =
+  | "magnitude"
+  | "log_magnitude"
+  | "real"
+  | "imag"
+  | "phase";
 
 export interface ComputeParams {
   wavelength: number;
@@ -98,38 +103,30 @@ function recycleBuffer(buf: ArrayBuffer | undefined) {
 }
 
 // ── Colormap functions ───────────────────────────────────────────────
+// Write directly into RGBA buffer to avoid per-pixel tuple allocation.
+// Uint8ClampedArray handles clamping and rounding automatically.
 
-function getViridisColor(t: number): [number, number, number] {
-  t = Math.max(0, Math.min(1, t));
-  const r = Math.round(
+function writeViridis(rgba: Uint8ClampedArray, idx: number, t: number): void {
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  rgba[idx] =
     255 *
-      (0.267004 +
-        t * (0.329415 + t * (-0.814464 + t * (2.28653 - t * 1.06868)))),
-  );
-  const g = Math.round(
+    (0.267004 + t * (0.329415 + t * (-0.814464 + t * (2.28653 - t * 1.06868))));
+  rgba[idx + 1] =
     255 *
-      (0.004874 +
-        t * (0.873449 + t * (0.107514 + t * (-0.631923 + t * 0.645732)))),
-  );
-  const b = Math.round(
+    (0.004874 +
+      t * (0.873449 + t * (0.107514 + t * (-0.631923 + t * 0.645732))));
+  rgba[idx + 2] =
     255 *
-      (0.329415 +
-        t * (1.01541 + t * (-1.67917 + t * (1.59456 - t * 0.594634)))),
-  );
-  return [
-    Math.max(0, Math.min(255, r)),
-    Math.max(0, Math.min(255, g)),
-    Math.max(0, Math.min(255, b)),
-  ];
+    (0.329415 + t * (1.01541 + t * (-1.67917 + t * (1.59456 - t * 0.594634))));
+  rgba[idx + 3] = 255;
 }
 
-function getPhaseColor(phase: number): [number, number, number] {
+function writePhase(rgba: Uint8ClampedArray, idx: number, phase: number): void {
   const h = ((phase + Math.PI) / (2 * Math.PI)) * 360;
-  const s = 0.8;
-  const l = 0.5;
-  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const c = 0.8; // s=0.8, l=0.5 → c = (1 - |2*0.5 - 1|) * 0.8
   const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
-  const m = l - c / 2;
+  const m = 0.1; // l - c/2 = 0.5 - 0.4
   let r = 0,
     g = 0,
     b = 0;
@@ -152,36 +149,38 @@ function getPhaseColor(phase: number): [number, number, number] {
     r = c;
     b = x;
   }
-  return [
-    Math.round((r + m) * 255),
-    Math.round((g + m) * 255),
-    Math.round((b + m) * 255),
-  ];
+  rgba[idx] = (r + m) * 255;
+  rgba[idx + 1] = (g + m) * 255;
+  rgba[idx + 2] = (b + m) * 255;
+  rgba[idx + 3] = 255;
 }
 
-function getDivergingColor(t: number): [number, number, number] {
-  t = Math.max(0, Math.min(1, t));
+function writeDiverging(rgba: Uint8ClampedArray, idx: number, t: number): void {
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
   if (t < 0.5) {
     const s = t * 2;
-    return [
-      Math.round(59 + s * (255 - 59)),
-      Math.round(76 + s * (255 - 76)),
-      Math.round(192 + s * (255 - 192)),
-    ];
+    rgba[idx] = 59 + s * 196;
+    rgba[idx + 1] = 76 + s * 179;
+    rgba[idx + 2] = 192 + s * 63;
   } else {
     const s = (t - 0.5) * 2;
-    return [
-      Math.round(255 - s * (255 - 180)),
-      Math.round(255 - s * (255 - 59)),
-      Math.round(255 - s * (255 - 59)),
-    ];
+    rgba[idx] = 255 - s * 75;
+    rgba[idx + 1] = 255 - s * 196;
+    rgba[idx + 2] = 255 - s * 196;
   }
+  rgba[idx + 3] = 255;
 }
 
 // ── Render field to RGBA ─────────────────────────────────────────────
 
-/** Physical exclusion radius around dipole (in world units). */
-const DIPOLE_EXCLUSION_RADIUS = 0.15;
+/** Physical exclusion radius around dipole (in world units).
+ *  DipoleExy diverges as H_1(kR)/R (stronger than DipoleEz's log singularity),
+ *  so it needs a larger exclusion zone to avoid washing out the color range. */
+const DIPOLE_EXCLUSION_RADIUS: Record<number, number> = {
+  2: 0.15, // DipoleEz: log singularity
+  3: 0.4, // DipoleExy: 1/R singularity
+};
 
 function renderFieldToRGBA(
   fieldReal: Float64Array,
@@ -208,7 +207,8 @@ function renderFieldToRGBA(
     const pxPerUnit = gridSize / vs;
     exclIx = Math.round((params.dipoleXs / vs + 0.5) * gridSize);
     exclIy = Math.round((0.5 - params.dipoleYs / vs) * gridSize);
-    const rPx = DIPOLE_EXCLUSION_RADIUS * pxPerUnit;
+    const rPx =
+      (DIPOLE_EXCLUSION_RADIUS[params.sourceType] ?? 0.15) * pxPerUnit;
     exclR2 = rPx * rPx;
   }
 
@@ -224,6 +224,11 @@ function renderFieldToRGBA(
       case "magnitude":
         val = Math.sqrt(re * re + im * im);
         break;
+      case "log_magnitude": {
+        const mag = Math.sqrt(re * re + im * im);
+        val = mag > 0 ? Math.log10(mag) : -20; // floor at -20 for zero
+        break;
+      }
       case "real":
         val = re;
         break;
@@ -265,36 +270,21 @@ function renderFieldToRGBA(
 
   if (mode === "phase") {
     for (let i = 0; i < n; i++) {
-      const color = getPhaseColor(values[i]);
-      const idx = i * 4;
-      rgba[idx] = color[0];
-      rgba[idx + 1] = color[1];
-      rgba[idx + 2] = color[2];
-      rgba[idx + 3] = 255;
+      writePhase(rgba, i * 4, values[i]);
     }
   } else if (mode === "real" || mode === "imag") {
     const absMax = Math.max(Math.abs(minVal), Math.abs(maxVal));
     const invTwoAbsMax = absMax > 0 ? 1 / (2 * absMax) : 0;
     for (let i = 0; i < n; i++) {
       const t = absMax > 0 ? (values[i] + absMax) * invTwoAbsMax : 0.5;
-      const color = getDivergingColor(t);
-      const idx = i * 4;
-      rgba[idx] = color[0];
-      rgba[idx + 1] = color[1];
-      rgba[idx + 2] = color[2];
-      rgba[idx + 3] = 255;
+      writeDiverging(rgba, i * 4, t);
     }
   } else {
     const range = maxVal - minVal;
     const invRange = range > 0 ? 1 / range : 0;
     for (let i = 0; i < n; i++) {
       const t = range > 0 ? (values[i] - minVal) * invRange : 0;
-      const color = getViridisColor(t);
-      const idx = i * 4;
-      rgba[idx] = color[0];
-      rgba[idx + 1] = color[1];
-      rgba[idx + 2] = color[2];
-      rgba[idx + 3] = 255;
+      writeViridis(rgba, i * 4, t);
     }
   }
 

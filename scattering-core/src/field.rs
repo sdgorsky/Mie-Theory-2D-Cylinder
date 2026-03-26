@@ -8,7 +8,7 @@
 
 use crate::bessel::{bessel_j, hankel1};
 use crate::scattering::RADIUS;
-use crate::sources::{compute_incident_field, Source};
+use crate::sources::{Source, SourceKind};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -20,6 +20,8 @@ pub const DEFAULT_VIEW_SIZE: f64 = 5.0;
 
 /// Number of points in radial spline grids
 const SPLINE_POINTS: usize = 128;
+/// Fewer knots for interior J_n(k1*r) splines (smaller range, complex k1 is expensive)
+const SPLINE_POINTS_INTERIOR: usize = 64;
 
 // ============================================================================
 // Cubic Spline Interpolation for Bessel Functions
@@ -29,6 +31,7 @@ const SPLINE_POINTS: usize = 128;
 /// Stores spline coefficients for both real and imaginary parts.
 struct BesselSpline {
     r_min: f64,
+    inv_dr: f64,
     dr: f64,
     /// Spline coefficients [a, b, c, d] for each interval (real part)
     coeffs_re: Vec<[f64; 4]>,
@@ -37,33 +40,18 @@ struct BesselSpline {
 }
 
 impl BesselSpline {
-    /// Create spline for Hankel function H_n^(1)(k0*r) over [r_min, r_max]
-    fn new_hankel(order: i32, k0: f64, r_min: f64, r_max: f64, n_points: usize) -> Self {
+    /// Build a spline by sampling `f(r)` at `n_points` uniformly spaced points
+    /// over `[r_min, r_max]`. All specialized constructors delegate here.
+    fn from_fn(r_min: f64, r_max: f64, n_points: usize, f: impl Fn(f64) -> Complex64) -> Self {
         let dr = (r_max - r_min) / (n_points - 1) as f64;
         let mut values_re = Vec::with_capacity(n_points);
         let mut values_im = Vec::with_capacity(n_points);
 
         for i in 0..n_points {
             let r = r_min + i as f64 * dr;
-            let hn = hankel1(order, Complex64::new(k0 * r, 0.0));
-            values_re.push(hn.re);
-            values_im.push(hn.im);
-        }
-
-        Self::from_values(r_min, dr, &values_re, &values_im)
-    }
-
-    /// Create spline for Bessel J_n(k1*r) over [r_min, r_max] where k1 may be complex
-    fn new_bessel_j(order: i32, k1: Complex64, r_min: f64, r_max: f64, n_points: usize) -> Self {
-        let dr = (r_max - r_min) / (n_points - 1) as f64;
-        let mut values_re = Vec::with_capacity(n_points);
-        let mut values_im = Vec::with_capacity(n_points);
-
-        for i in 0..n_points {
-            let r = r_min + i as f64 * dr;
-            let jn = bessel_j(order, k1 * r);
-            values_re.push(jn.re);
-            values_im.push(jn.im);
+            let v = f(r);
+            values_re.push(v.re);
+            values_im.push(v.im);
         }
 
         Self::from_values(r_min, dr, &values_re, &values_im)
@@ -75,6 +63,7 @@ impl BesselSpline {
         let coeffs_im = Self::compute_spline_coefficients(values_im, dr);
         BesselSpline {
             r_min,
+            inv_dr: 1.0 / dr,
             dr,
             coeffs_re,
             coeffs_im,
@@ -129,7 +118,7 @@ impl BesselSpline {
     /// Evaluate spline at radius r, returning complex value
     #[inline]
     fn eval(&self, r: f64) -> Complex64 {
-        let t = (r - self.r_min) / self.dr;
+        let t = (r - self.r_min) * self.inv_dr;
         let i = (t as usize).min(self.coeffs_re.len().saturating_sub(1));
         let x = r - (self.r_min + i as f64 * self.dr);
 
@@ -140,6 +129,151 @@ impl BesselSpline {
         let im = a_im + x * (b_im + x * (c_im + x * d_im));
 
         Complex64::new(re, im)
+    }
+}
+
+// ============================================================================
+// Modal Spline Cache
+// ============================================================================
+
+/// Key identifying the parameters that determine modal spline values.
+/// If the key matches, the cached splines can be reused.
+#[derive(Clone, PartialEq)]
+struct ModalSplineKey {
+    k0: u64,    // f64 bits for exact comparison
+    k1_re: u64, // complex k1 real part bits
+    k1_im: u64, // complex k1 imag part bits
+    max_order: usize,
+    view_size: u64, // affects r_max for exterior splines
+}
+
+impl ModalSplineKey {
+    fn new(k0: f64, k1: Complex64, max_order: usize, view_size: f64) -> Self {
+        Self {
+            k0: k0.to_bits(),
+            k1_re: k1.re.to_bits(),
+            k1_im: k1.im.to_bits(),
+            max_order,
+            view_size: view_size.to_bits(),
+        }
+    }
+}
+
+/// Minimum distance for incident field splines. Points closer than this to the
+/// dipole source get NaN (handled gracefully in the FE colormap).
+/// Must not be too small: the Miller backward recurrence for K_n(z) needs
+/// ~O(1/|z|) iterations, so very small R causes expensive spline construction.
+/// 0.02 gives ~3-4 pixel exclusion zone at 512×512 on a 5×5 grid.
+const INCIDENT_R_MIN: f64 = 0.02;
+
+/// Cached modal splines — reused across frames when material/wavelength/order don't change.
+pub struct ModalSplineCache {
+    key: ModalSplineKey,
+    k0: f64,
+    k1: Complex64,
+    /// Max radius for exterior incident splines (diagonal of 2× the view).
+    ext_r_max: f64,
+    /// Max radius for interior incident splines (2× cylinder radius).
+    int_r_max: f64,
+    /// Exterior modal: H_n(k0*r) for n=0..N, r in [RADIUS, r_max] (real k0)
+    hankel_splines: Vec<BesselSpline>,
+    /// Interior modal: J_n(k1*r) for n=0..N, r in [0, RADIUS] (complex k1)
+    bessel_splines: Vec<BesselSpline>,
+    /// Incident field splines — built lazily on first dipole use.
+    /// Exterior dipole splines (real k0, cheap to build):
+    incident_h0_k0: Option<BesselSpline>,
+    incident_rh1_k0: Option<BesselSpline>,
+    /// Interior dipole splines (complex k1, expensive to build):
+    incident_h0_k1: Option<BesselSpline>,
+    incident_rh1_k1: Option<BesselSpline>,
+}
+
+/// Knot counts for incident field splines.
+const INCIDENT_SPLINE_POINTS_EXT: usize = 256;
+const INCIDENT_SPLINE_POINTS_INT: usize = 64;
+
+impl ModalSplineCache {
+    fn build(k0: f64, k1: Complex64, max_order: usize, view_size: f64) -> Self {
+        let half_size = view_size / 2.0;
+        let r_max = (2.0_f64).sqrt() * half_size;
+        let ext_r_max = 2.0 * r_max;
+        let int_r_max = 2.0 * RADIUS;
+
+        // Always needed: modal splines for the scattering expansion
+        let hankel_splines: Vec<BesselSpline> = (0..=max_order as i32)
+            .map(|n| {
+                BesselSpline::from_fn(RADIUS, r_max, SPLINE_POINTS, |r| {
+                    hankel1(n, Complex64::new(k0 * r, 0.0))
+                })
+            })
+            .collect();
+
+        let bessel_splines: Vec<BesselSpline> = (0..=max_order as i32)
+            .map(|n| {
+                BesselSpline::from_fn(1e-10, RADIUS, SPLINE_POINTS_INTERIOR, |r| {
+                    bessel_j(n, k1 * r)
+                })
+            })
+            .collect();
+
+        // Incident field splines built lazily — only when a dipole source is used
+        Self {
+            key: ModalSplineKey::new(k0, k1, max_order, view_size),
+            k0,
+            k1,
+            ext_r_max,
+            int_r_max,
+            hankel_splines,
+            bessel_splines,
+            incident_h0_k0: None,
+            incident_rh1_k0: None,
+            incident_h0_k1: None,
+            incident_rh1_k1: None,
+        }
+    }
+
+    /// Get or build the exterior H_0(k0*R) incident spline.
+    fn get_incident_h0_k0(&mut self) -> &BesselSpline {
+        let k0 = self.k0;
+        let ext_r_max = self.ext_r_max;
+        self.incident_h0_k0.get_or_insert_with(|| {
+            BesselSpline::from_fn(INCIDENT_R_MIN, ext_r_max, INCIDENT_SPLINE_POINTS_EXT, |r| {
+                hankel1(0, Complex64::new(k0 * r, 0.0))
+            })
+        })
+    }
+
+    /// Get or build the exterior R*H_1(k0*R) regularized incident spline.
+    fn get_incident_rh1_k0(&mut self) -> &BesselSpline {
+        let k0 = self.k0;
+        let ext_r_max = self.ext_r_max;
+        self.incident_rh1_k0.get_or_insert_with(|| {
+            BesselSpline::from_fn(INCIDENT_R_MIN, ext_r_max, INCIDENT_SPLINE_POINTS_EXT, |r| {
+                hankel1(1, Complex64::new(k0 * r, 0.0)) * r
+            })
+        })
+    }
+
+    /// Get or build the interior H_0(k1*R) incident spline.
+    fn get_incident_h0_k1(&mut self) -> &BesselSpline {
+        let k1 = self.k1;
+        let int_r_max = self.int_r_max;
+        self.incident_h0_k1.get_or_insert_with(|| {
+            BesselSpline::from_fn(INCIDENT_R_MIN, int_r_max, INCIDENT_SPLINE_POINTS_INT, |r| {
+                hankel1(0, k1 * r)
+            })
+        })
+    }
+
+    /// Get or build the interior R*H_1(k1*R) regularized incident spline.
+    fn get_incident_rh1_k1(&mut self) -> &BesselSpline {
+        let k1 = self.k1;
+        let int_r_max = self.int_r_max;
+        self.incident_rh1_k1.get_or_insert_with(|| {
+            BesselSpline::from_fn(INCIDENT_R_MIN, int_r_max, INCIDENT_SPLINE_POINTS_INT, |r| {
+                hankel1(1, k1 * r) * r
+            })
+        })
     }
 }
 
@@ -177,7 +311,7 @@ pub struct FieldParams {
 /// Result of field computation.
 #[derive(Debug, Clone)]
 pub struct FieldResult {
-    pub field_real: Vec<f64>, // Real part of complex field values (row-major, GRID_SIZE x GRID_SIZE)
+    pub field_real: Vec<f64>, // Real part of complex field values (row-major, grid_size x grid_size)
     pub field_imag: Vec<f64>, // Imaginary part of complex field values
     pub grid_size: usize,     // Number of grid points on each edge
     pub view_size: f64,       // Physical dimension of the grid (5.0 means -2.5 to +2.5)
@@ -188,13 +322,14 @@ pub struct FieldResult {
     pub y_max: f64,
 }
 
-/// Compute the electric field on a GRID_SIZE x GRID_SIZE grid.
+/// Compute the electric field on a grid, reusing cached modal splines when possible.
 ///
-/// The grid covers a 5D x 5D area centered on the cylinder (D = diameter = 1).
-/// So the grid spans from -2.5 to +2.5 in both x and y.
+/// If `cache` is `Some` and its key matches the current parameters, the cached
+/// splines are reused (skipping expensive Bessel function evaluations).
+/// The cache is updated in-place when a rebuild is needed.
 ///
 /// Uses optimized spline interpolation for Bessel/Hankel functions.
-pub fn compute_field(params: &FieldParams) -> FieldResult {
+pub fn compute_field(params: &FieldParams, cache: &mut Option<ModalSplineCache>) -> FieldResult {
     let n_coeffs = params.orders.len();
 
     // Convert coefficient arrays to complex vectors
@@ -231,79 +366,113 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
     let y_max = half_size;
     let dx = view_size / (grid_size as f64);
 
-    // ===== PHASE 1: Build splines for Bessel functions =====
+    // ===== PHASE 1: Modal splines (cached) =====
+    // Exploit symmetry: f_{-n}(r) = (-1)^n f_n(r) for both J_n and H_n^(1).
+    // Build splines only for non-negative orders 0..N (N+1 splines instead of 2N+1).
+    // Reuse cached splines when material/wavelength/order haven't changed.
 
-    // Maximum radius on the grid (corner of the view)
-    let r_max = (2.0_f64).sqrt() * half_size;
+    let max_order = n_coeffs / 2; // N, where orders span -N..+N
 
-    // Exterior: Hankel H_n(k0*r) for r in [RADIUS, r_max]
-    let hankel_splines: Vec<BesselSpline> = params
-        .orders
-        .iter()
-        .map(|&n| BesselSpline::new_hankel(n, k0, RADIUS, r_max, SPLINE_POINTS))
-        .collect();
+    let key = ModalSplineKey::new(k0, k1, max_order, view_size);
+    if cache.as_ref().is_none_or(|c| c.key != key) {
+        *cache = Some(ModalSplineCache::build(k0, k1, max_order, view_size));
+    }
 
-    // Interior: Bessel J_n(k1*r) for r in [0, RADIUS]
-    // Use small epsilon to avoid r=0 singularity issues
-    let bessel_splines: Vec<BesselSpline> = params
-        .orders
-        .iter()
-        .map(|&n| BesselSpline::new_bessel_j(n, k1, 1e-10, RADIUS, SPLINE_POINTS))
-        .collect();
+    // ===== PHASE 2: Build dipole incident field spline (if applicable) =====
 
-    // ===== PHASE 2: Compute field on full grid =====
+    let source = params.source;
+    let source_interior = source.is_interior();
+
+    let incident_mode = build_incident_mode(source, source_interior, k0, k1);
+
+    // Lazily build the incident splines needed for this source type.
+    {
+        let modal = cache.as_mut().unwrap();
+        match source.kind {
+            SourceKind::DipoleEz { .. } => {
+                if source_interior {
+                    modal.get_incident_h0_k1();
+                } else {
+                    modal.get_incident_h0_k0();
+                }
+            }
+            SourceKind::DipoleExy { .. } => {
+                if source_interior {
+                    modal.get_incident_rh1_k1();
+                } else {
+                    modal.get_incident_rh1_k0();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Immutable borrow for the grid loop
+    let modal = cache.as_ref().unwrap();
+    let hankel_splines = &modal.hankel_splines;
+    let bessel_splines = &modal.bessel_splines;
+    // Dummy fallback for plane wave (never actually evaluated)
+    let dummy = &modal.hankel_splines[0];
+    let h0_spline = if source_interior {
+        modal.incident_h0_k1.as_ref().unwrap_or(dummy)
+    } else {
+        modal.incident_h0_k0.as_ref().unwrap_or(dummy)
+    };
+    let rh1_spline = if source_interior {
+        modal.incident_rh1_k1.as_ref().unwrap_or(dummy)
+    } else {
+        modal.incident_rh1_k0.as_ref().unwrap_or(dummy)
+    };
+
+    // ===== PHASE 3: Compute field on full grid =====
 
     let total_points = grid_size * grid_size;
     let mut field_real = vec![0.0; total_points];
     let mut field_imag = vec![0.0; total_points];
 
-    // Pre-allocate exp(i*n*θ) table — reused for every grid point
-    let mut exp_table = vec![Complex64::new(0.0, 0.0); n_coeffs];
+    // Pre-allocate exp(i*k*θ) table for k = 0..N — reused for every grid point
+    let mut exp_table = vec![Complex64::new(0.0, 0.0); max_order + 1];
 
-    let source = params.source;
-    let source_interior = source.is_interior();
+    // Precompute x values (same for every row)
+    let x_vals: Vec<f64> = (0..grid_size)
+        .map(|ix| x_min + (ix as f64 + 0.5) * dx)
+        .collect();
 
-    // Source wavenumber: k0 for exterior sources, k1 for interior sources
-    let k_source = if source_interior {
-        k1
-    } else {
-        Complex64::new(k0, 0.0)
-    };
+    // mid = N, the index of order 0 in the coefficient arrays
+    let mid = max_order;
 
     for iy in 0..grid_size {
         let y = y_max - (iy as f64 + 0.5) * dx;
+        let y_sq = y * y;
         let row_offset = iy * grid_size;
 
-        for ix in 0..grid_size {
-            let x = x_min + (ix as f64 + 0.5) * dx;
-            let r = (x * x + y * y).sqrt();
+        for (ix, &x) in x_vals.iter().enumerate() {
+            let r = (x * x + y_sq).sqrt();
 
             // cos(θ) = x/r, sin(θ) = y/r — avoids atan2 + cos/sin calls
             let inv_r = 1.0 / r;
             let cos_theta = x * inv_r;
             let sin_theta = y * inv_r;
 
-            // Fill exp(i*n*θ) table using recurrence (0 trig calls)
-            fill_exp_intheta(&mut exp_table, cos_theta, sin_theta);
+            // Fill exp(i*k*θ) for k = 0..N using forward recurrence only
+            fill_exp_intheta_half(&mut exp_table, cos_theta, sin_theta);
 
             let idx = row_offset + ix;
 
             let field = if r < RADIUS {
-                // Interior: c_n expansion + incident field if source is interior
-                let modal = compute_interior_field_spline(&c_n, &bessel_splines, r, &exp_table);
+                let modal_c = compute_modal_sum_symmetric(&c_n, bessel_splines, r, &exp_table, mid);
                 if source_interior {
-                    modal + compute_incident_field(source, k_source, x, y)
+                    modal_c + eval_incident(&incident_mode, h0_spline, rh1_spline, x, y)
                 } else {
-                    modal
+                    modal_c
                 }
             } else {
-                // Exterior: b_n expansion + incident field if source is exterior
                 let scattered =
-                    compute_scattered_field_spline(&b_n, &hankel_splines, r, &exp_table);
+                    compute_modal_sum_symmetric(&b_n, hankel_splines, r, &exp_table, mid);
                 if source_interior {
                     scattered
                 } else {
-                    scattered + compute_incident_field(source, k_source, x, y)
+                    scattered + eval_incident(&incident_mode, h0_spline, rh1_spline, x, y)
                 }
             };
 
@@ -324,62 +493,168 @@ pub fn compute_field(params: &FieldParams) -> FieldResult {
     }
 }
 
-/// Fill pre-allocated buffer with exp(i*n*θ) values for all orders.
-/// Uses angle-addition recurrence: only needs cos(θ) and sin(θ), no per-order trig.
-/// Orders are consecutive integers from -N to +N (2N+1 values).
+/// Fill pre-allocated buffer with exp(i*k*θ) for k = 0..N (forward only).
+/// Negative-order angular factors are obtained via conjugation in the modal sum.
 #[inline]
-fn fill_exp_intheta(table: &mut [Complex64], cos_t: f64, sin_t: f64) {
-    let mid = table.len() / 2;
-
-    // exp(i*0*θ) = 1
-    table[mid] = Complex64::new(1.0, 0.0);
-
-    // Step: exp(i*θ) for forward recurrence, exp(-i*θ) for backward
-    let step_fwd = Complex64::new(cos_t, sin_t); // exp(+iθ)
-    let step_bwd = Complex64::new(cos_t, -sin_t); // exp(-iθ)
-
-    // Forward: exp(i*(n+1)*θ) = exp(i*n*θ) * exp(i*θ)
-    for k in 1..=mid {
-        table[mid + k] = table[mid + k - 1] * step_fwd;
-    }
-    // Backward: exp(i*(n-1)*θ) = exp(i*n*θ) * exp(-i*θ)
-    for k in 1..=mid {
-        table[mid - k] = table[mid - k + 1] * step_bwd;
+fn fill_exp_intheta_half(table: &mut [Complex64], cos_t: f64, sin_t: f64) {
+    table[0] = Complex64::new(1.0, 0.0);
+    let step = Complex64::new(cos_t, sin_t); // exp(+iθ)
+    for k in 1..table.len() {
+        table[k] = table[k - 1] * step;
     }
 }
 
-/// Compute interior field using spline-interpolated Bessel J values
+/// Compute modal sum exploiting Bessel order symmetry:
+///   f_{-n}(r) = (-1)^n f_n(r)
+///
+/// The coefficient array `coeffs` has 2N+1 entries for orders -N..+N,
+/// with index `mid` corresponding to order 0.
+/// The `splines` array has N+1 entries for orders 0..N.
+/// The `exp_table` has N+1 entries: exp(i*k*θ) for k = 0..N.
+///
+/// Sum = coeffs[mid] * f_0(r)
+///     + Σ_{k=1}^{N} f_k(r) * [coeffs[mid+k]*exp(ikθ) + (-1)^k * coeffs[mid-k]*exp(-ikθ)]
 #[inline]
-fn compute_interior_field_spline(
-    c_n: &[Complex64],
-    bessel_splines: &[BesselSpline],
+fn compute_modal_sum_symmetric(
+    coeffs: &[Complex64],
+    splines: &[BesselSpline],
     r: f64,
     exp_table: &[Complex64],
+    mid: usize,
 ) -> Complex64 {
-    let mut field = Complex64::new(0.0, 0.0);
+    // k = 0 term
+    let mut sum = coeffs[mid] * splines[0].eval(r);
 
-    for i in 0..c_n.len() {
-        let jn = bessel_splines[i].eval(r);
-        field += c_n[i] * jn * exp_table[i];
+    // Paired terms k = 1..N
+    let n_max = exp_table.len() - 1; // = N
+    for k in 1..=n_max {
+        let fk = splines[k].eval(r);
+        let exp_pos = exp_table[k]; // exp(+ikθ)
+                                    // exp(-ikθ) = conj(exp(+ikθ))
+        let exp_neg = Complex64::new(exp_pos.re, -exp_pos.im);
+
+        let combined = if k % 2 == 0 {
+            // (-1)^k = +1
+            coeffs[mid + k] * exp_pos + coeffs[mid - k] * exp_neg
+        } else {
+            // (-1)^k = -1
+            coeffs[mid + k] * exp_pos - coeffs[mid - k] * exp_neg
+        };
+
+        sum += fk * combined;
     }
 
-    field
+    sum
 }
 
-/// Compute scattered field: Σ_n b_n * H_n(k0*r) * exp(i*n*θ)
-#[inline]
-fn compute_scattered_field_spline(
-    b_n: &[Complex64],
-    hankel_splines: &[BesselSpline],
-    r: f64,
-    exp_table: &[Complex64],
-) -> Complex64 {
-    let mut scattered = Complex64::new(0.0, 0.0);
-    for i in 0..b_n.len() {
-        let hn = hankel_splines[i].eval(r);
-        scattered += b_n[i] * hn * exp_table[i];
+// ============================================================================
+// Incident Field — spline-accelerated for dipole sources
+// ============================================================================
+
+/// Precomputed incident field evaluation strategy.
+/// Dipole sources use cached spline-interpolated Hankel functions over distance R
+/// from the dipole. The splines are built in `ModalSplineCache` and reused across
+/// frames — only the dipole position (xs, ys) changes per frame.
+enum IncidentMode {
+    /// exp(ikx) — cheap, no spline needed.
+    PlaneWave { k: Complex64 },
+    /// (i/4) H_0(k R) with cached spline over R = distance from (xs, ys).
+    DipoleEz {
+        xs: f64,
+        ys: f64,
+        prefactor: Complex64,
+    },
+    /// (ik/4) H_1(k R) sin(φ_R - α) with cached regularized spline.
+    /// sin(φ_R - α) = (dy cos α − dx sin α) / R  (avoids atan2 + sin).
+    DipoleExy {
+        xs: f64,
+        ys: f64,
+        prefactor: Complex64,
+        cos_alpha: f64,
+        sin_alpha: f64,
+    },
+}
+
+fn build_incident_mode(
+    source: Source,
+    source_interior: bool,
+    k0: f64,
+    k1: Complex64,
+) -> IncidentMode {
+    match source.kind {
+        SourceKind::PlaneWaveTM | SourceKind::PlaneWaveTE => {
+            let k = if source_interior {
+                k1
+            } else {
+                Complex64::new(k0, 0.0)
+            };
+            IncidentMode::PlaneWave { k }
+        }
+        SourceKind::DipoleEz { xs, ys } => IncidentMode::DipoleEz {
+            xs,
+            ys,
+            prefactor: Complex64::i() / 4.0,
+        },
+        SourceKind::DipoleExy { xs, ys, alpha } => {
+            let k = if source_interior {
+                k1
+            } else {
+                Complex64::new(k0, 0.0)
+            };
+            IncidentMode::DipoleExy {
+                xs,
+                ys,
+                prefactor: Complex64::i() * k / 4.0,
+                cos_alpha: alpha.cos(),
+                sin_alpha: alpha.sin(),
+            }
+        }
     }
-    scattered
+}
+
+/// Evaluate incident field at (x, y) using the precomputed mode and cached splines.
+/// Returns NaN for points too close to the dipole source (R < INCIDENT_R_MIN).
+#[inline]
+fn eval_incident(
+    mode: &IncidentMode,
+    h0_spline: &BesselSpline,
+    rh1_spline: &BesselSpline,
+    x: f64,
+    y: f64,
+) -> Complex64 {
+    match mode {
+        IncidentMode::PlaneWave { k } => (Complex64::i() * k * x).exp(),
+        IncidentMode::DipoleEz { xs, ys, prefactor } => {
+            let ddx = x - xs;
+            let ddy = y - ys;
+            let dist = (ddx * ddx + ddy * ddy).sqrt();
+            if dist < INCIDENT_R_MIN {
+                return Complex64::new(f64::NAN, f64::NAN);
+            }
+            prefactor * h0_spline.eval(dist)
+        }
+        IncidentMode::DipoleExy {
+            xs,
+            ys,
+            prefactor,
+            cos_alpha,
+            sin_alpha,
+        } => {
+            let ddx = x - xs;
+            let ddy = y - ys;
+            let r_sq = ddx * ddx + ddy * ddy;
+            if r_sq < INCIDENT_R_MIN * INCIDENT_R_MIN {
+                return Complex64::new(f64::NAN, f64::NAN);
+            }
+            // Spline stores r * H_1(k*r) (regularized — smooth near r=0).
+            // sin(φ_R - α) = (dy cos α − dx sin α) / R.
+            // Total: prefactor * [r * H_1] * (dy cos α − dx sin α) / r²
+            let dist = r_sq.sqrt();
+            let rh1 = rh1_spline.eval(dist);
+            let angular = ddy * cos_alpha - ddx * sin_alpha;
+            prefactor * rh1 * angular / r_sq
+        }
+    }
 }
 
 #[cfg(test)]
@@ -701,7 +976,7 @@ mod tests {
             source: Source::new(SourceKind::PlaneWaveTM, RADIUS),
         };
 
-        let result = compute_field(&field_params);
+        let result = compute_field(&field_params, &mut None);
 
         // Check that we have non-trivial field values
         let mut min_mag = f64::MAX;

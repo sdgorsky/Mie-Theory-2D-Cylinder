@@ -181,7 +181,34 @@ export const FieldVisualization = memo(function FieldVisualization({
         );
       }
     }
-  }, [showOverlay, width, height, sourceType, dipole]);
+    // dipole intentionally excluded: marker position is handled by
+    // dipoleRef + repaintOverlay (immediate) and paintRef (on worker result).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showOverlay, width, height, sourceType]);
+
+  // Repaint overlay from temp canvas (used for dipole marker updates and hover)
+  const repaintOverlay = useCallback(() => {
+    const canvas = canvasRef.current;
+    const tempCanvas = tempCanvasRef.current;
+    if (!canvas || tempCanvas.width === 0) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, 0, 0, width, height);
+    if (showOverlayRef.current) {
+      drawOverlay(ctx, width, height, lastViewSizeRef.current);
+      if (isDipoleSource(sourceTypeRef.current) && hoveringCanvasRef.current) {
+        drawDipoleMarker(
+          ctx,
+          dipoleRef.current,
+          sourceTypeRef.current,
+          lastViewSizeRef.current,
+          width,
+          height,
+        );
+      }
+    }
+  }, [width, height]);
 
   // Mouse interaction for dipole dragging
   const handleMouseDown = useCallback(
@@ -231,47 +258,30 @@ export const FieldVisualization = memo(function FieldVisualization({
 
       const d = dipoleRef.current;
 
+      let newDipole: typeof d;
       if (target === "position") {
         const { x, y } = canvasToPhys(mx, my, viewSize);
-        const newDipole = {
+        newDipole = {
           ...d,
           xs: Math.round(x * 20) / 20,
           ys: Math.round(y * 20) / 20,
         };
-        dipoleUpdateRef.current?.(newDipole);
-      } else if (target === "orientation") {
+      } else {
         const { cx, cy } = physToCanvas(d.xs, d.ys, viewSize);
         const alpha = Math.atan2(-(my - cy), mx - cx); // y inverted
-        const newDipole = { ...d, alpha: Math.round(alpha * 100) / 100 };
-        dipoleUpdateRef.current?.(newDipole);
+        newDipole = { ...d, alpha: Math.round(alpha * 100) / 100 };
       }
-    },
-    [canvasToPhys, physToCanvas, dipoleUpdateRef],
-  );
 
-  // Repaint overlay from temp canvas (used to show/hide dipole marker on hover)
-  const repaintOverlay = useCallback(() => {
-    const canvas = canvasRef.current;
-    const tempCanvas = tempCanvasRef.current;
-    if (!canvas || tempCanvas.width === 0) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(tempCanvas, 0, 0, width, height);
-    if (showOverlayRef.current) {
-      drawOverlay(ctx, width, height, lastViewSizeRef.current);
-      if (isDipoleSource(sourceTypeRef.current) && hoveringCanvasRef.current) {
-        drawDipoleMarker(
-          ctx,
-          dipoleRef.current,
-          sourceTypeRef.current,
-          lastViewSizeRef.current,
-          width,
-          height,
-        );
-      }
-    }
-  }, [width, height]);
+      // Update ref immediately so the marker tracks the mouse without
+      // waiting for the worker round-trip, then repaint overlay.
+      dipoleRef.current = newDipole;
+      repaintOverlay();
+
+      // Dispatch to controls → worker (async)
+      dipoleUpdateRef.current?.(newDipole);
+    },
+    [canvasToPhys, physToCanvas, dipoleUpdateRef, repaintOverlay],
+  );
 
   const handleMouseEnter = useCallback(() => {
     hoveringCanvasRef.current = true;
@@ -324,6 +334,12 @@ export const FieldVisualization = memo(function FieldVisualization({
         <sub>z</sub>|
       </span>
     ),
+    log_magnitude: (
+      <span>
+        log|{fieldSymbol}
+        <sub>z</sub>|
+      </span>
+    ),
     real: (
       <span>
         Re({fieldSymbol}
@@ -350,7 +366,7 @@ export const FieldVisualization = memo(function FieldVisualization({
         <label>Display:</label>
         <div className="mode-pill">
           <div
-            className="pill-highlight pill-highlight-4"
+            className="pill-highlight pill-highlight-5"
             style={{
               transform: `translateX(${(Object.keys(modeLabels) as VisualizationMode[]).indexOf(mode) * 100}%)`,
             }}
