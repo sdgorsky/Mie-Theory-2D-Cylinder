@@ -50,6 +50,7 @@ function wasmEnvPlugin(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: process.env.CI ? '/webapp-single-cylinder-scattering-2D/' : '/',
   plugins: [
     react(),
     wasm(),
