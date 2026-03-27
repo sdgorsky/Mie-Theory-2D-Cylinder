@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
 import path from 'path'
+import { readFileSync } from 'fs'
+
+const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
 // Plugin to provide "env" module for WASM imports (math functions from libm)
 function wasmEnvPlugin(): Plugin {
@@ -51,6 +54,9 @@ function wasmEnvPlugin(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   base: process.env.CI ? '/Mie-Theory-2D-Cylinder/' : '/',
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     react(),
     wasm(),

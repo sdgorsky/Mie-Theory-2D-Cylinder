@@ -14,6 +14,26 @@
   margin: 0;
   font-size: 1.8rem;
   color: #e0e0e0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.github-link {
+  color: #666;
+  transition: color 0.2s;
+  display: inline-flex;
+}
+
+.github-link:hover {
+  color: #e0e0e0;
+}
+
+.version-tag {
+  font-size: 0.75rem;
+  color: #666;
+  font-weight: 400;
+  letter-spacing: 0.02em;
 }
 
 .app-header p {
