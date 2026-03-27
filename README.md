@@ -31,6 +31,7 @@ $$
 \nabla \times \mathbf{H}&=-i\omega\epsilon_r\mathbf{E}
 \end{aligned}
 $$
+
 where $\{\mathbf{E}, \mathbf{H}, \epsilon_r, \mu_r\}$ are functions of position $\mathbf{r}$ in the transverse plane orthogonal to the cylinder axis.
 
 ### Solution
@@ -106,7 +107,8 @@ make format
 │   ├── src/
 │   │   ├── bessel.rs     # Bessel/Hankel functions
 │   │   ├── scattering.rs # Mie coefficients
-│   │   └── field.rs      # Field computation
+│   │   ├── field.rs      # Field computation
+│   │   └── sources.rs    # Source coefficients and field computations
 │   └── tests/            # Validation tests
 └── Makefile              # Build commands
 ```
